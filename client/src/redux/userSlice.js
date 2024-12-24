@@ -105,6 +105,9 @@ export const userSlice = createSlice({
     },
     extraReducers:(builder) => {
         builder
+        .addCase(userRegister.pending, (state, action) => {
+            state.status = "pending";            
+        })
         .addCase(userRegister.fulfilled, (state, action) => {
             state.user = action.payload.user;
             localStorage.setItem('token', action.payload.token);            
@@ -115,6 +118,9 @@ export const userSlice = createSlice({
         })
 
 
+        .addCase(userLogin.pending, (state, action) => {
+            state.status = "pending";
+        })
         .addCase(userLogin.fulfilled, (state, action) => {
             state.status = "done";
             state.user = action.payload.user;

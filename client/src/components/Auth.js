@@ -80,7 +80,7 @@ function Auth() {
         <input
           type="button"
           onClick={handleAuth}
-          value={isLogin ? 'Login' : 'Sign Up'}
+          value={status === 'pending' ?  <i class="fa fa-spinner fa-pulse fa-2x fa-fw fa-lg"></i> : isLogin ? 'Login' : 'Sign Up' }
         />
       </div>
     </div>
