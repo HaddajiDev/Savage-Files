@@ -30,14 +30,7 @@ router.post("/register", registerRules(), validation, async (request, result) =>
 		}
 		const token = await jwt.sign(payload, process.env.SCTY_KEY, {
 			expiresIn: '7d'
-		});  
-
-        res.cookie('authToken', token, {
-            httpOnly: true,
-            secure: process.env.NODE_ENV === 'production', 
-            sameSite: 'Strict',
-        });
-      
+		});
         
         result.status(200).send({ user: res, msg: "user added", token: `bearer ${token}` });
    

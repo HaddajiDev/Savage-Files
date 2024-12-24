@@ -11,7 +11,7 @@ export const userRegister = createAsyncThunk(
         const result = await axios.post(link + '/register', user);
         return result.data;
       } catch (error) {
-        return rejectWithValue(error.response?.data || { error: "An unknown error occurred" });
+        return rejectWithValue(error.response.data);
       }
     }
   );
@@ -24,7 +24,7 @@ export const userRegister = createAsyncThunk(
         console.log(result.data);
         return result.data;
       } catch (error) {  
-        return rejectWithValue(error.response?.data || { error: "An unknown error occurred" });
+        return rejectWithValue(error.response.data);
       }
     }
   );
@@ -108,30 +108,32 @@ export const userSlice = createSlice({
     extraReducers:(builder) => {
         builder
         .addCase(userRegister.pending, (state, action) => {
-            state.status = "pending";            
+            state.status = "pending";   
+            state.error = null;
         })
         .addCase(userRegister.fulfilled, (state, action) => {
-            state.status = "Done";
+            state.status = "done";
             state.user = action.payload.user;
             localStorage.setItem('token', action.payload.token);            
         })
         .addCase(userRegister.rejected, (state, action) => {
             state.status = "failed";
-		    state.error = action.payload.errors[0].msg;            
+		    state.error = action.payload.error || "Something went Wrong";            
         })
-
+//state.error = action.payload?.errors[0].msg
 
         .addCase(userLogin.pending, (state, action) => {
             state.status = "pending";
+            state.error = null;
         })
         .addCase(userLogin.fulfilled, (state, action) => {
             state.status = "done";
             state.user = action.payload.user;
-            localStorage.setItem('token', action.payload.token);            
+            localStorage.setItem('token', action.payload.token);
         })
         .addCase(userLogin.rejected, (state, action) => {
             state.status = "failed";
-		    state.error = action.payload.errors[0].msg;            
+		    state.error = action.payload.error || "Something went Wrong";            
         })
 
 
