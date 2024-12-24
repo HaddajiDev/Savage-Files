@@ -130,8 +130,8 @@ const handleUpload = async() => {
               <p>{file.size}</p>
             </div>
             <div className="file-actions">
-              <a href={`http://localhost:2000/files/inspect/${file.ID}`} target="_blank" className="action-link">Inspect</a>
-              <a href={`http://localhost:2000/files/download/${file.ID}`} target="_blank" className="action-link">Download</a>
+              <a href={process.env.REACT_APP_LINK_FILES + `/inspect/${file.ID}`} target="_blank" className="action-link">Inspect</a>
+              <a href={process.env.REACT_APP_LINK_FILES + `/download/${file.ID}`} target="_blank" className="action-link">Download</a>
               <button style={{border: 'none'}}
                 onClick={() => handleCopying(file.ID, index)}
                 className="copy-link-button"
