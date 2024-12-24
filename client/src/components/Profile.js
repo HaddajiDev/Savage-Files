@@ -77,7 +77,7 @@ const handleUpload = async() => {
   };
 
   const handleCopying = (fileid, index) => {    
-    navigator.clipboard.writeText(`http://localhost:2000/files/inspect/${fileid}`);
+    navigator.clipboard.writeText(process.env.REACT_APP_LINK_FILES + `/inspect/${fileid}`);
     const copy = document.getElementsByClassName("copy-link-button");
     copy[index].innerHTML = "Copied";
   }
