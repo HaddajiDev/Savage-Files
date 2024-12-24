@@ -115,7 +115,11 @@ const handleUpload = async() => {
           {status === "uploading" && <p>Uploading...</p>}
         </div>
       )}
-      <section className="file-list">
+      <div style={{display: 'flex', justifyContent: 'center', width: '100%'}}>
+        {status === 'pending' ?  <></> : <i class="fa fa-spinner fa-pulse fa-fw fa-lg"></i>}
+      </div>
+      
+      <section className="file-list">        
         {files?.map((file, index) => (
           <div key={file.ID} className="file-card">
             <div className="file-info">

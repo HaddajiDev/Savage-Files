@@ -397,7 +397,7 @@ nav span {
 }
 
 /* Submit button styling */
-.login-box input[type="button"] {
+.loginbtn{
   width: 90%; /* Match input width */
   max-width: 350px;
   padding: 0.8rem;
@@ -411,12 +411,10 @@ nav span {
   cursor: pointer;
   transition: transform 0.2s, box-shadow 0.3s;
   box-sizing: border-box;
-}
-
-/* Hover effect for button */
-.login-box input[type="button"]:hover {
-  transform: translateY(-2px);
-  box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+  &:hover{
+    transform: translateY(-2px);
+    box-shadow: 0 4px 10px rgba(0, 0, 0, 0.2);
+  }
 }
 
 /* Login title styling */

@@ -109,6 +109,7 @@ export const userSlice = createSlice({
             state.status = "pending";            
         })
         .addCase(userRegister.fulfilled, (state, action) => {
+            state.status = "Done";
             state.user = action.payload.user;
             localStorage.setItem('token', action.payload.token);            
         })
@@ -136,8 +137,12 @@ export const userSlice = createSlice({
             state.user = action.payload?.user || null;            
         })
 
+        .addCase(GetUserFiles.pending, (state, action) => {
+            state.status = "pending";
+        })
         .addCase(GetUserFiles.fulfilled, (state, action) => {
-            state.files = action.payload?.files || [];            
+            state.files = action.payload?.files || [];   
+            state.status = "Done";
         })
 
 

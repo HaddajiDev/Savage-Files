@@ -77,11 +77,8 @@ function Auth() {
           }
         />
         {status === 'failed' && <p style={{ color: 'red' }}>{error}</p>}
-        <input
-          type="button"
-          onClick={handleAuth}
-          value={status === 'pending' ?  <i class="fa fa-spinner fa-pulse fa-2x fa-fw fa-lg"></i> : isLogin ? 'Login' : 'Sign Up' }
-        />
+        
+        <button className='loginbtn' onClick={handleAuth}>{status === 'pending' ?  <i class="fa fa-spinner fa-pulse fa-fw fa-lg"></i> : isLogin ? 'Login' : 'Sign Up' }</button>
       </div>
     </div>
   );
