@@ -119,8 +119,8 @@ const handleUpload = async() => {
         {status === 'pending' ?  <></> : <i class="fa fa-spinner fa-pulse fa-fw fa-lg"></i>}
       </div>
       
-      <section className="file-list">        
-        {files?.map((file, index) => (
+      <section className={files?.length > 0 ? "file-list" : ""}>        
+        {files?.length > 0 ? files?.map((file, index) => (
           <div key={file.ID} className="file-card">
             <div className="file-info">
             <h4 className="file-name">
@@ -142,7 +142,7 @@ const handleUpload = async() => {
               <button style={{border: 'none'}} onClick={() => handleDeleteWithConfirmation(file.ID)} className="delete-button">Delete</button>
             </div>
           </div>
-        ))}
+        )): <div style={{display: 'flex', justifyContent: 'center', width: '100%'}}><h4>No files</h4></div>}
       </section>
     </div>
     </>

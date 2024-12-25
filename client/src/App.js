@@ -6,10 +6,7 @@ import {Route, Routes, useNavigate} from 'react-router-dom';
 import PrivateRoute from './components/PrivateRoute';
 import Home from './components/Home';
 import Profile from './components/Profile';
-import Register from './components/Register';
-import Login from './components/Login';
 import LogedinRoutes from './components/LogedinRoutes';
-import NavBar from './components/NavBar';
 import Auth from './components/Auth';
 
 function App() {

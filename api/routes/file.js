@@ -36,7 +36,10 @@ module.exports = (db, bucket) => {
                 .on('finish', async() => {
                     let newFile = new allFiles({
                         fileId: uploadStream.id,
-                        userId: req.params.id
+                        userId: req.params.id,
+                        file_name: uploadStream.filename,
+                        size: `${FormatFileSize(uploadStream.length)}`
+
                     });
                     await newFile.save();
                     res.status(200).send("File uploaded successfully");
