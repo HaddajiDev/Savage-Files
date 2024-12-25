@@ -481,3 +481,10 @@ h1 {
   font-size: 1.8rem;
   color: #333;
 }
+
+
+.warn{
+  font-size: 12px;
+  color: darkgray;
+  font-weight: bold;
+}
