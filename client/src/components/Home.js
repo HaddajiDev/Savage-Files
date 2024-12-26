@@ -52,12 +52,12 @@ function Home() {
       </section>
       <section className="cta">
         <h2>Get Started Today</h2>
-        <p>Join thousands of users who trust FileManager for their file management needs.</p>
+        <p>Join the 2 users who trust Savage Files for their file management needs.</p>
         <button className="cta-button"><Link to='/login' style={{all: 'unset'}}>Sign Up Now</Link></button>
       </section>
 
       <footer className="footer">
-        <p>© 2024 FileManager. All rights reserved.</p>
+        <p>© 2024 Savage Files. All rights reserved.</p>
       </footer>
     </div>
   );
