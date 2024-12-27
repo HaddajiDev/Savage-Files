@@ -1,9 +1,10 @@
 import React, { useEffect } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import '../Home.css';
+import { getCookie } from '../redux/userSlice';
 function Home() {
   const Navigate = useNavigate();
-  const auth = localStorage.getItem('token');
+  const auth = getCookie('token');
   useEffect(() => {
     if(auth){
       Navigate('/profile');
@@ -11,13 +12,11 @@ function Home() {
   }, [])
   return (
     <div className="homepage-container">
-      {/* Navbar */}
       <nav className="navbar">
         <div className="navbar-brand">Savage Files</div>
         <button className="login-button"><Link to='/login' style={{all: 'unset'}}>Login</Link></button>
       </nav>
 
-      {/* Hero Section */}
       <header className="hero">
         <div className="hero-text">
           <h1>Welcome to Savage Files</h1>
@@ -29,7 +28,6 @@ function Home() {
         </div>
       </header>
 
-      {/* Features Section */}
       <section className="features">
         <h2>Why Choose Savage Files ?</h2>
         <div className="feature-list">

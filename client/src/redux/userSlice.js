@@ -113,7 +113,7 @@ export const userSlice = createSlice({
         .addCase(userRegister.fulfilled, (state, action) => {
             state.status = "done";
             state.user = action.payload.user;
-            document.cookie = `token=${action.payload.token}`;
+            setCookie('token', action.payload.token, 7);
         })
         .addCase(userRegister.rejected, (state, action) => {
             state.status = "failed";
@@ -128,7 +128,8 @@ export const userSlice = createSlice({
         .addCase(userLogin.fulfilled, (state, action) => {
             state.status = "done";
             state.user = action.payload.user;
-            document.cookie = `token=${action.payload.token}`;
+            setCookie('token', action.payload.token, 7);
+            
         })
         .addCase(userLogin.rejected, (state, action) => {
             state.status = "failed";
@@ -192,6 +193,13 @@ export function getCookie(cname) {
 function eraseCookie(name) {   
     document.cookie = name +'=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
 }
+
+function setCookie(cname, cvalue, exdays) {
+    const d = new Date();
+    d.setTime(d.getTime() + (exdays*24*60*60*1000));
+    let expires = "expires="+ d.toUTCString();
+    document.cookie = cname + "=" + cvalue + ";" + expires + ";path=/";
+} 
 
 export const { logout } = userSlice.actions
 
