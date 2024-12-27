@@ -27,8 +27,6 @@ function Profile() {
   const handleUpload = async () => {
     if (file) {
       setUpload(true);
-
-      // Show SweetAlert2 spinner
       Swal.fire({
         title: 'Uploading...',
         text: 'Please wait while your file is being uploaded.',
@@ -48,11 +46,8 @@ function Profile() {
         fileInput.value = "";
         setSelectedFile(null);
         setFile(null);
-
-        // Close spinner and show success message
         Swal.fire('Uploaded!', 'Your file has been uploaded successfully.', 'success');
       } catch (error) {
-        // Show error message
         Swal.fire('Error!', 'There was an issue uploading your file.', 'error');
       } finally {
         setUpload(false);
@@ -74,7 +69,6 @@ function Profile() {
       cancelButtonText: 'Cancel',
     }).then(async (result) => {
       if (result.isConfirmed) {
-        // Show SweetAlert2 spinner for deleting
         Swal.fire({
           title: 'Deleting...',
           text: 'Please wait while your file is being deleted.',
@@ -85,11 +79,9 @@ function Profile() {
         });
 
         try {
-          await dispatch(DeleteFile(fileId)).unwrap();
-          // Close spinner and show success message
+          await dispatch(DeleteFile({fileId: fileId, userId: user._id})).unwrap();
           Swal.fire('Deleted!', 'Your file has been deleted successfully.', 'success');
         } catch (error) {
-          // Show error message
           Swal.fire('Error!', 'There was an issue deleting your file.', 'error');
         }
       }

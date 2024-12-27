@@ -20,8 +20,7 @@ export const userRegister = createAsyncThunk(
     'user/login',
     async (user, { rejectWithValue }) => {
       try {
-        const result = await axios.post(link + '/login', user);
-        console.log(result.data);
+        const result = await axios.post(link + '/login', user);        
         return result.data;
       } catch (error) {  
         return rejectWithValue(error.response.data);
@@ -34,7 +33,7 @@ export const currentUser = createAsyncThunk('user/current', async() => {
     try {
         let result = await axios.get(link + '/current', {
             headers:{
-                Authorization: localStorage.getItem("token"),
+                Authorization: getCookie("token"),
             }
         });
         return result.data;
@@ -65,9 +64,9 @@ export const uploadFile = createAsyncThunk('user/upload', async({userId, file}) 
     }
 });
 
-export const DeleteFile = createAsyncThunk('user/delete', async(fileId) => {
+export const DeleteFile = createAsyncThunk('user/delete', async({fileId, userId}) => {
     try {
-        const result = await axios.delete(link_files + `/delete/${fileId}`);
+        const result = await axios.delete(link_files + `/delete/${fileId}/${userId}`);
         return result.data;
     } catch (error) {
         console.log(error);
@@ -100,7 +99,7 @@ export const userSlice = createSlice({
     initialState,
     reducers: {
         logout(state) {
-            localStorage.removeItem('token');  
+            eraseCookie('token');
             state.files = null;
             state.user = null;          
         }  
@@ -114,13 +113,13 @@ export const userSlice = createSlice({
         .addCase(userRegister.fulfilled, (state, action) => {
             state.status = "done";
             state.user = action.payload.user;
-            localStorage.setItem('token', action.payload.token);            
+            document.cookie = `token=${action.payload.token}`;
         })
         .addCase(userRegister.rejected, (state, action) => {
             state.status = "failed";
 		    state.error = action.payload.error || "Something went Wrong";            
         })
-//state.error = action.payload?.errors[0].msg
+
 
         .addCase(userLogin.pending, (state, action) => {
             state.status = "pending";
@@ -129,7 +128,7 @@ export const userSlice = createSlice({
         .addCase(userLogin.fulfilled, (state, action) => {
             state.status = "done";
             state.user = action.payload.user;
-            localStorage.setItem('token', action.payload.token);
+            document.cookie = `token=${action.payload.token}`;
         })
         .addCase(userLogin.rejected, (state, action) => {
             state.status = "failed";
@@ -173,6 +172,26 @@ export const userSlice = createSlice({
     }
 })
 
+
+export function getCookie(cname) {
+    let name = cname + "=";
+    let decodedCookie = decodeURIComponent(document.cookie);
+    let ca = decodedCookie.split(';');
+    for(let i = 0; i <ca.length; i++) {
+      let c = ca[i];
+      while (c.charAt(0) == ' ') {
+        c = c.substring(1);
+      }
+      if (c.indexOf(name) == 0) {
+        return c.substring(name.length, c.length);
+      }
+    }
+    return "";
+}
+
+function eraseCookie(name) {   
+    document.cookie = name +'=; Path=/; Expires=Thu, 01 Jan 1970 00:00:01 GMT;';
+}
 
 export const { logout } = userSlice.actions
 

@@ -117,20 +117,6 @@ module.exports = (db, bucket) => {
         }
     });
 
-    router.get('/all', async(req, res) => {
-        try {
-            const files = await files_collection.find({}, 
-                {projection: {_id : 1, filename: 1, length: 1}}
-            ).toArray();
-            const fileList = files.map(file => `ID: "${file._id}", Filename: "${file.filename}", size: "${FormatFileSize(file.length)}"`).join('\n');
-            
-            res.status(200).send(fileList);
-        } catch (error) {
-            console.error(error);
-            res.status(500).send('Error Loading files.');
-        }
-    });
-
     router.get('/all/:id', async(req, res) => {
         try {
             const userfiles = await allFiles.find({userId: req.params.id});
@@ -156,11 +142,15 @@ module.exports = (db, bucket) => {
         }
     });
 
-    router.delete('/delete/:id', async (req, res) => {
+    router.delete('/delete/:file/:userId', async (req, res) => {
         try {
-            const idField = new ObjectId(req.params.id);
+            const idField = new ObjectId(req.params.file);
 
             const file = await files_collection.findOne({ _id: idField });
+            const currentFile = await allFiles.findOne({fileId: file});
+            if(currentFile.userId.toString() !== req.params.userId.toString()){
+                return res.status(404).send(`<h1>Not Authorized</h1>`);
+            }
             await allFiles.deleteOne({fileId: idField});
             
  

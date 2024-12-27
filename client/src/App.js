@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react';
 import './App.css';
 import { useDispatch, useSelector } from 'react-redux';
-import { currentUser, userRegister } from './redux/userSlice';
+import { currentUser, getCookie, userRegister } from './redux/userSlice';
 import {Route, Routes, useNavigate} from 'react-router-dom';
 import PrivateRoute from './components/PrivateRoute';
 import Home from './components/Home';
@@ -11,7 +11,7 @@ import Auth from './components/Auth';
 
 function App() {
 
-  const auth = localStorage.getItem('token');
+  const auth = getCookie('token');
   const dispatch = useDispatch();
   useEffect(() => {
     if(auth){
