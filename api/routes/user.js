@@ -26,7 +26,7 @@ router.post("/register", registerRules(), validation, async (request, result) =>
         let res = await newUser.save();
 
 		const payload = {
-			_id: res._id
+			username: res.username
 		}
 		const token = await jwt.sign(payload, process.env.SCTY_KEY, {
 			expiresIn: '7d'
@@ -60,7 +60,7 @@ router.post('/login', loginRules(), validation, async (request, result) => {
         }       
 
 		const payload = {
-			_id: searchedUser._id
+			username: searchedUser.username
 		}
 		const token = await jwt.sign(payload, process.env.SCTY_KEY, {
 			expiresIn: '7d'
