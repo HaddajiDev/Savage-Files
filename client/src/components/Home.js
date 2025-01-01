@@ -14,7 +14,11 @@ function Home() {
     <div className="homepage-container">
       <nav className="navbar">
         <div className="navbar-brand">Savage Files</div>
-        <button className="login-button"><Link to='/login' style={{all: 'unset'}}>Login</Link></button>
+        <div style={{display: 'flex', justifyContent: 'center'}}>
+          <a style={{all: 'unset'}} href='https://github.com/HaddajiDev/Savage-Files' target='_blank'><button style={{backgroundColor: 'white', marginRight: "10px"}}><img style={{width: '30px'}} src={`${process.env.REACT_APP_LINK_FILES}/inspect/6775cb5ed742e6d398cc880f`}/></button></a>
+          <button className="login-button"><Link to='/login' style={{all: 'unset'}}>Login</Link></button>          
+        </div>
+        
       </nav>
 
       <header className="hero">
@@ -52,6 +56,14 @@ function Home() {
         <h2>Get Started Today</h2>
         <p>Join the 2 users who trust Savage Files for their file management needs.</p>
         <button className="cta-button"><Link to='/login' style={{all: 'unset'}}>Sign Up Now</Link></button>
+        <div style={{marginTop: '10px'}}>
+          
+          <a style={{all: 'unset'}} href='https://github.com/HaddajiDev/Savage-Files' target='_blank'>
+            <button style={{backgroundColor: 'white', borderRadius: "10px", width: "50px", height: "50px", border: 'none', cursor: "pointer"}}>
+              <img style={{width: '30px'}} src={`${process.env.REACT_APP_LINK_FILES}/inspect/6775cb5ed742e6d398cc880f`}/>
+            </button>
+          </a>
+        </div>
       </section>
 
       <footer className="footer">
