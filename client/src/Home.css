@@ -1,157 +1,210 @@
-/* General Reset */
-body, h1, h2, p, button {
-    margin: 0;
-    padding: 0;
-    box-sizing: border-box;
-    font-family: 'Arial', sans-serif;
-  }
-  
-  .homepage-container {
-    display: flex;
-    flex-direction: column;
-    min-height: 100vh;
-  }
-  
-  /* Navbar */
-  .navbar {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    padding: 20px;
-    background-color: #1f2937;
-    color: white;
-  }
-  
-  .navbar-brand {
-    font-size: 24px;
-    font-weight: bold;
-  }
-  
-  .login-button {
-    background-color: #4caf50;
-    color: white;
-    border: none;
-    padding: 10px 20px;
-    border-radius: 5px;
-    cursor: pointer;
-    font-size: 16px;
-    transition: background-color 0.3s ease;
-  }
-  
-  .login-button:hover {
-    background-color: #45a049;
-  }
-  
-  /* Hero Section */
+/* Global Reset & Base Styles */
+* {
+  margin: 0;
+  padding: 0;
+  box-sizing: border-box;
+}
+
+body {
+  font-family: 'Helvetica Neue', Arial, sans-serif;
+  background-color: #121212;
+  color: #e0e0e0;
+  line-height: 1.6;
+}
+
+/* Homepage Container */
+.homepage-container {
+  display: flex;
+  flex-direction: column;
+  min-height: 100vh;
+}
+
+/* Navbar */
+.navbar {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 1rem 2rem;
+  background-color: #1e1e1e;
+  border-bottom: 1px solid #333;
+}
+
+.navbar-brand {
+  font-size: 1.8rem;
+  font-weight: bold;
+  color: #ffffff;
+}
+
+.navbar a {
+  text-decoration: none;
+  color: inherit;
+}
+
+.login-button {
+  background-color: #00ffff;
+  color: black;
+  border: none;
+  padding: 0.5rem 1rem;
+  border-radius: 4px;
+  transition: background-color 0.3s ease;
+  cursor: pointer;
+}
+
+.login-button:hover {
+  background-color: #009797;
+}
+
+/* Hero Section */
+.hero {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-around;
+  padding: 3rem 2rem;
+  background-color: #1e1e1e;
+}
+
+.hero-text {
+  flex: 1 1 400px;
+  max-width: 600px;
+  padding: 1rem;
+}
+
+.hero-text h1 {
+  font-size: 2.5rem;
+  margin-bottom: 1rem;
+  color: #00ffff;
+}
+
+.hero-text p {
+  font-size: 1.1rem;
+  margin-bottom: 1.5rem;
+  color: white !important;
+  text-align: left !important;
+}
+
+.cta-button {
+  background-color: #00ffff;
+  color: black;
+  border: none;
+  padding: 0.75rem 1.5rem;
+  font-size: 1rem;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background-color 0.3s ease;
+}
+
+.cta-button:hover {
+  background-color: #37fcfc;
+}
+
+.hero-image {
+  flex: 1 1 400px;
+  display: flex;
+  justify-content: flex-end;
+  padding: 1rem;
+}
+
+.hero-image img {
+  max-width: 100%;
+  border-radius: 8px;
+}
+
+/* Features Section */
+.features {
+  padding: 3rem 2rem;
+  background-color: #121212;
+  text-align: center;
+}
+
+.features h2 {
+  font-size: 2rem;
+  margin-bottom: 2rem;
+  color: white !important;
+}
+
+.feature-list {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 2rem;
+}
+
+.feature {
+  background-color: #1e1e1e;
+  border-radius: 8px;
+  padding: 1rem;
+  max-width: 300px;
+  transition: transform 0.3s ease, box-shadow 0.3s ease;
+  color: white !important;
+}
+
+.feature:hover {
+  transform: translateY(-5px);
+  box-shadow: 0 8px 16px rgba(0, 0, 0, 0.2);
+}
+
+.feature img {
+  width: 100%;
+  height: auto;
+  border-radius: 8px;
+  margin-bottom: 1rem;
+}
+
+.feature h3 {
+  font-size: 1.5rem;
+  margin-bottom: 0.5rem;
+}
+
+.feature p {
+  font-size: 1rem;
+  line-height: 1.4;
+  color: white !important;
+}
+
+/* Call to Action Section */
+.cta {
+  padding: 3rem 2rem;
+  background-color: #1e1e1e;
+  text-align: center;
+  color: white !important;
+}
+
+.cta h2 {
+  font-size: 2rem;
+  margin-bottom: 1rem;
+}
+
+.cta p {
+  font-size: 1.1rem;
+  margin-bottom: 1.5rem;
+  color: white !important;
+}
+
+/* Footer */
+.footer {
+  margin-top: auto;
+  padding: 1rem 2rem;
+  background-color: #1e1e1e;
+  text-align: center;
+  border-top: 1px solid #333;
+  font-size: 0.9rem;
+  color: white !important;
+}
+
+.footer p{
+  color: white !important;
+}
+
+/* Responsive Styles */
+@media (max-width: 768px) {
   .hero {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    padding: 50px;
-    background-color: #f3f4f6;
-  }
-  
-  .hero-text {
-    max-width: 50%;
-  }
-  
-  .hero-text h1 {
-    font-size: 48px;
-    margin-bottom: 20px;
-    color: #1f2937;
-  }
-  
-  .hero-text p {
-    font-size: 18px;
-    color: #6b7280;
-    margin-bottom: 20px;
-  }
-  
-  .cta-button {
-    background-color: #008cba;
-    color: white;
-    padding: 15px 30px;
-    border: none;
-    border-radius: 5px;
-    cursor: pointer;
-    font-size: 16px;
-    transition: background-color 0.3s ease;
-  }
-  
-  .cta-button:hover {
-    background-color: #007bb5;
-  }
-  
-  .hero-image img {
-    max-width: 100%;
-    height: auto;
-    border-radius: 10px;
-  }
-  
-  /* Features Section */
-  .features {
-    text-align: center;
-    padding: 50px 20px;
-    background-color: white;
-  }
-  
-  .features h2 {
-    font-size: 36px;
-    color: #1f2937;
-    margin-bottom: 30px;
-  }
-  
-  .feature-list {
-    display: flex;
-    justify-content: space-around;
-    gap: 20px;
-    flex-wrap: wrap;
-  }
-  
-  .feature {
-    max-width: 300px;
+    flex-direction: column;
     text-align: center;
   }
   
-  .feature img {
-    width: 100px;
-    height: 100px;
-    margin-bottom: 15px;
+  .hero-text,
+  .hero-image {
+    padding: 1rem 0;
   }
-  
-  .feature h3 {
-    font-size: 20px;
-    margin-bottom: 10px;
-    color: #1f2937;
-  }
-  
-  .feature p {
-    color: #6b7280;
-  }
-  
-  /* Call to Action Section */
-  .cta {
-    text-align: center;
-    padding: 50px 20px;
-    background-color: #1f2937;
-    color: white;
-  }
-  
-  .cta h2 {
-    font-size: 36px;
-    margin-bottom: 20px;
-  }
-  
-  .cta p {
-    font-size: 18px;
-    margin-bottom: 30px;
-  }
-  
-  /* Footer */
-  .footer {
-    text-align: center;
-    padding: 20px;
-    background-color: #1f2937;
-    color: white;
-  }
-  
+}

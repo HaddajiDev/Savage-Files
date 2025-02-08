@@ -67,7 +67,7 @@ function Home() {
       </section>
 
       <footer className="footer">
-        <p>© 2024 Savage Files. All rights reserved.</p>
+        <p>© {new Date().getFullYear()} Savage Files. All rights reserved.</p>
       </footer>
     </div>
   );
