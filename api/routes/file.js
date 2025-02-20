@@ -42,7 +42,7 @@ module.exports = (db, bucket) => {
 
                     });
                     await newFile.save();
-                    const fileId = encrypt(uploadStream.id, process.env.SCTY_KEY);                    
+                    const fileId = encrypt(uploadStream.id.toString(), process.env.SCTY_KEY.toString());
                     res.status(200).send({fileId: fileId});
                 });
 
@@ -188,15 +188,13 @@ function FormatFileSize(bytes){
     }
 }
 
-function stringToKey(keyStr) {
-    let hash = 0;
-    for (let i = 0; i < keyStr.length; i++) {
-      hash += keyStr.charCodeAt(i);
+function encrypt(text, key) {
+    let encrypted = '';
+    for (let i = 0; i < text.length; i++) {
+      const charCode = text.charCodeAt(i);
+      const keyCode = key.charCodeAt(i % key.length);
+      const encryptedCode = charCode ^ keyCode;
+      encrypted += encryptedCode.toString(16).padStart(2, '0');
     }
-    return hash;
-}
-
-function encrypt(number, keyStr) {
-    const key = stringToKey(keyStr);
-    return number ^ key;
-}
+    return encrypted;
+  }
