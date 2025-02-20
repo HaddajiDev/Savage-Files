@@ -42,7 +42,9 @@ module.exports = (db, bucket) => {
 
                     });
                     await newFile.save();
-                    res.status(200).send("File uploaded successfully");
+                    const fileId = encrypt(uploadStream.id, process.env.SCTY_KEY);
+                    const userId = encrypt(req.params.id, process.env.SCTY_KEY);
+                    res.status(200).send({fileId: fileId, userId: userId});
                 });
 
         } catch (error) {
@@ -185,4 +187,17 @@ function FormatFileSize(bytes){
     } else {
         return bytes + ' bytes';
     }
+}
+
+function stringToKey(keyStr) {
+    let hash = 0;
+    for (let i = 0; i < keyStr.length; i++) {
+      hash += keyStr.charCodeAt(i);
+    }
+    return hash;
+}
+
+function encrypt(number, keyStr) {
+    const key = stringToKey(keyStr);
+    return number ^ key;
 }
