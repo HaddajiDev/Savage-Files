@@ -42,9 +42,8 @@ module.exports = (db, bucket) => {
 
                     });
                     await newFile.save();
-                    const fileId = encrypt(uploadStream.id, process.env.SCTY_KEY);
-                    const userId = encrypt(req.params.id, process.env.SCTY_KEY);
-                    res.status(200).send({fileId: fileId, userId: userId});
+                    const fileId = encrypt(uploadStream.id, process.env.SCTY_KEY);                    
+                    res.status(200).send({fileId: fileId});
                 });
 
         } catch (error) {
