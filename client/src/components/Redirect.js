@@ -16,7 +16,7 @@ function Redirect() {
                 try {
                     const result = await dispatch(GenerateToken(id)).unwrap();
                     setCookie('token', result.token, { expires: 7 });
-                    navigate('/profile');
+                    navigate('/');
                 } catch (error) {
                     console.error('Error generating token:', error);
                 }
