@@ -9,21 +9,20 @@ function Redirect() {
     const id = query.get('id');
     const dispatch = useDispatch();
     const navigate = useNavigate();
-    const status = useSelector((state) => state.user.status);
 
     useEffect(() => {
-        if (id && status !== 'succeeded') {
-            dispatch(GenerateToken(id));
-        }
-    }, [id, dispatch, status]);
-
-    useEffect(() => {
-        if (status === 'succeeded') {
-            navigate('/profile');
-        } else if (status === 'failed') {
-            console.error('Token generation failed');
-        }
-    }, [status, navigate]);
+        const fetchToken = async () => {
+            if (id) {
+                try {
+                    await dispatch(GenerateToken(id)).unwrap();
+                    navigate('/profile');
+                } catch (error) {
+                    console.error('Error generating token:', error);
+                }
+            }
+        };
+        fetchToken();
+    }, [id, dispatch, navigate]);
 
     return <div>Redirect</div>;
 }
