@@ -87,7 +87,7 @@ export const inspect = createAsyncThunk('user/inspect', async(fileId) => {
     }
 })
 
-export const GenerateToken = createAsyncThunk('user/files', async(userId) => {
+export const GenerateToken = createAsyncThunk('user/geenrateToken', async(userId) => {
     try {
         let result = await axios.get(link + `/generate?id=${userId}`);
         return result.data;
