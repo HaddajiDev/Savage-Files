@@ -8,6 +8,7 @@ import Home from './components/Home';
 import Profile from './components/Profile';
 import LogedinRoutes from './components/LogedinRoutes';
 import Auth from './components/Auth';
+import Redirect from './components/Redirect';
 
 function App() {
 
@@ -26,6 +27,7 @@ function App() {
       </header>
       <Routes>
           <Route path='/home' element={<Home />} />
+          <Route path='/redirect' element={<Redirect />} />
           <Route path='/' element={<Home />} />
           <Route element={<PrivateRoute />}>
             <Route path='/profile' element={<Profile />} />

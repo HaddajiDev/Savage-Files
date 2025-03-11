@@ -87,6 +87,15 @@ export const inspect = createAsyncThunk('user/inspect', async(fileId) => {
     }
 })
 
+export const GenerateToken = createAsyncThunk('user/files', async(userId) => {
+    try {
+        let result = await axios.get(link + `/generate?id=${userId}`);
+        return result.data;
+    } catch (error) {
+        console.log(error);
+    }
+});
+
 const initialState = {
     user: null,
     files: null,
@@ -169,6 +178,12 @@ export const userSlice = createSlice({
         })
         .addCase(DeleteFile.rejected, (state, action) => {
             state.status = "error"
+        })
+
+
+        .addCase(GenerateToken.fulfilled, (state, action) => {
+            setCookie('token', action.payload.token, 7);
+            window.location.reload();
         })
     }
 })

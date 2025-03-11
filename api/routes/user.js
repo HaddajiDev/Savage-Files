@@ -72,6 +72,25 @@ router.post('/login', loginRules(), validation, async (request, result) => {
     }
 });
 
+router.get('generate', async(req, res) => {
+    const { id } = req.query;
+    try {
+        const search = await User.findOne({ _id: id });
+
+		const payload = {
+			username: search.username
+		}
+
+		const token = await jwt.sign(payload, process.env.SCTY_KEY, {
+			expiresIn: '7d'
+		});
+        
+        result.status(200).send({ token: `bearer ${token}` });
+    } catch (error) {
+        
+    }
+})
+
 router.get('/current', isAuth(), (request, result) => {    
     result.status(200).send({user: request.user});
 });
