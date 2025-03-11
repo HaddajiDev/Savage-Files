@@ -72,24 +72,18 @@ router.post('/login', loginRules(), validation, async (request, result) => {
     }
 });
 
-router.get('generate', async(req, res) => {
+router.get('/generate', async (req, res) => {
     const { id } = req.query;
     try {
         const search = await User.findOne({ _id: id });
-
-		const payload = {
-			username: search.username
-		}
-
-		const token = await jwt.sign(payload, process.env.SCTY_KEY, {
-			expiresIn: '7d'
-		});
-        
-        result.status(200).send({ token: `bearer ${token}` });
+        if (!search) return res.status(404).send({ error: 'User not found' });
+        const payload = { username: search.username };
+        const token = await jwt.sign(payload, process.env.SCTY_KEY, { expiresIn: '7d' });
+        res.status(200).send({ token: `bearer ${token}` });
     } catch (error) {
-        
+        res.status(500).send({ error: 'Internal server error' });
     }
-})
+});
 
 router.get('/current', isAuth(), (request, result) => {    
     result.status(200).send({user: request.user});
