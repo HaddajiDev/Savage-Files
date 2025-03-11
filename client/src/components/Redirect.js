@@ -13,7 +13,7 @@ function Redirect() {
     useEffect(async() => {
         if (id){
             await dispatch(GenerateToken(id)).unwrap();
-            navigate('/profile');
+            window.location.reload();
         } 
             
     }, [id, dispatch]);
