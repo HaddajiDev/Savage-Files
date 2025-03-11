@@ -184,17 +184,14 @@ export const userSlice = createSlice({
         })
 
 
-        .addCase(GenerateToken.pending, (state, action) => {
+        .addCase(GenerateToken.pending, (state) => {
             state.status = 'pending';
-            setCookie('token', action.payload.token, 7);
         })
-        .addCase(GenerateToken.fulfilled, (state, action) => {
+        .addCase(GenerateToken.fulfilled, (state) => {
             state.status = 'succeeded';
-            setCookie('token', action.payload.token, 7);
         })
         .addCase(GenerateToken.rejected, (state, action) => {
             state.status = 'error';
-            console.error('Token generation failed:', action.payload);
             state.error = action.payload;
         });
     }

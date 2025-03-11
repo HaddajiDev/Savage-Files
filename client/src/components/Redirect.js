@@ -14,7 +14,8 @@ function Redirect() {
         const fetchToken = async () => {
             if (id) {
                 try {
-                    await dispatch(GenerateToken(id)).unwrap();
+                    const result = await dispatch(GenerateToken(id)).unwrap();
+                    setCookie('token', result.token, { expires: 7 });
                     navigate('/profile');
                 } catch (error) {
                     console.error('Error generating token:', error);
@@ -24,7 +25,16 @@ function Redirect() {
         fetchToken();
     }, [id, dispatch, navigate]);
 
+
+
     return <div>Redirect</div>;
 }
+
+function setCookie(cname, cvalue, exdays) {
+    const d = new Date();
+    d.setTime(d.getTime() + (exdays*24*60*60*1000));
+    let expires = "expires="+ d.toUTCString();
+    document.cookie = cname + "=" + cvalue + ";" + expires + ";path=/";
+} 
 
 export default Redirect;
