@@ -183,7 +183,7 @@ export const userSlice = createSlice({
 
         .addCase(GenerateToken.fulfilled, (state, action) => {
             setCookie('token', action.payload.token, 7);
-            window.location.reload();
+            window.location.reload(); 
         })
     }
 })
