@@ -186,7 +186,6 @@ export const userSlice = createSlice({
 
         .addCase(GenerateToken.fulfilled, (state, action) => {
             setCookie('token', action.payload.token, 7);
-            window.location.reload();
         })
         .addCase(GenerateToken.rejected, (state, action) => {
             console.error('Token generation failed:', action.payload);
