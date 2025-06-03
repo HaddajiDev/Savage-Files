@@ -1,47 +1,51 @@
-import React from 'react'
-import { useDispatch, useSelector } from 'react-redux';
-import { useNavigate } from 'react-router-dom';
-import { logout } from '../redux/userSlice';
+"use client"
+import { useDispatch, useSelector } from "react-redux"
+import { useNavigate } from "react-router-dom"
+import { logout } from "../redux/userSlice"
 
 function NavBar() {
-    const navigate = useNavigate();
-    const user = useSelector((state) => state.user.user);
-    const dispatch = useDispatch();
-    const handleLogout = () => {   
-      dispatch(logout());      
-      navigate('/login');
-    };
-  
-    return (
-      <nav className="bg-gray-800 p-4 shadow-lg">
-        <div className="container mx-auto flex items-center justify-between">
-          {/* Logo */}
-          <div className="text-white text-xl font-bold cursor-pointer">
-            <span><h4>Savage Files</h4></span>
-          </div>
-  
-          {/* User Profile Section */}
-          <div className="flex items-center space-x-4">
-            {/* Profile Picture Placeholder */}
-            {/* <div className="w-10 h-10 rounded-full bg-gray-500 flex items-center justify-center text-white text-lg font-semibold">
-              <span>{"username"?.charAt(0).toUpperCase() || "U"}</span>
-            </div> */}
-  
-            {/* Username */}
-            <span className="text-white font-medium">{user?.username}     </span>
-  
-            {/* Logout Button */}
-            <button
-              onClick={handleLogout}
-              className="bg-red-500 hover:bg-red-600 text-white font-medium py-1 px-4 rounded transition duration-200"
-            >
-              Logout
-            </button>
-          </div>
-        </div>
-      </nav>
-    );
+  const navigate = useNavigate()
+  const user = useSelector((state) => state.user.user)
+  const dispatch = useDispatch()
+  const handleLogout = () => {
+    dispatch(logout())
+    navigate("/login")
   }
-  
+
+  return (
+    <nav>
+      <div className="container">
+        {/* Logo */}
+        <div className="navbar-brand" onClick={() => navigate("/profile")}>
+          Savage Files
+        </div>
+
+        {/* Navigation Links */}
+        <div className="nav-links">
+          <button className="nav-link-button" onClick={() => navigate("/developer")}>
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor">
+              <path d="M9.4 16.6L4.8 12l4.6-4.6L8 6l-6 6 6 6 1.4-1.4zm5.2 0L19.2 12l-4.6-4.6L16 6l6 6-6 6-1.4-1.4z" />
+            </svg>
+            Developer
+          </button>
+        </div>
+
+        {/* User Profile Section */}
+        <div className="nav-user-section">
+          {/* Profile Picture with First Letter */}
+          <div className="profile-pic">
+            <span>{user?.username?.charAt(0).toUpperCase() || "U"}</span>
+          </div>
+
+          {/* Username */}
+          <span className="username-display">{user?.username}</span>
+
+          {/* Logout Button */}
+          <button onClick={handleLogout}>Logout</button>
+        </div>
+      </div>
+    </nav>
+  )
+}
 
 export default NavBar
