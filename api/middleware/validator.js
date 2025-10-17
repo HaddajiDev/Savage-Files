@@ -17,7 +17,7 @@ exports.registerRules = () =>
 
 exports.loginRules = () =>
     [
-        check('username', 'username is required').notEmpty(),       
+        check('username', 'Username or email is required').notEmpty(),       
         check('password', 'password is required').isLength({
             min:6,
             max:20

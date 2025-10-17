@@ -12,6 +12,7 @@ import LogedinRoutes from "./components/LogedinRoutes"
 import Auth from "./components/Auth"
 import Redirect from "./components/Redirect"
 import Developer from "./components/Developer"
+import PasswordReset from "./components/PasswordReset"
 
 function App() {
   const auth = getCookie("token")
@@ -28,6 +29,8 @@ function App() {
       <Routes>
         <Route path="/home" element={<Home />} />
         <Route path="/redirect" element={<Redirect />} />
+        <Route path="/reset-password-form" element={<PasswordReset />} />
+        
         <Route path="/" element={<Home />} />
         <Route element={<PrivateRoute />}>
           <Route path="/profile" element={<Profile />} />

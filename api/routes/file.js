@@ -8,13 +8,12 @@ const upload = multer({ storage });
 
 const isAuth = require('../middleware/passport');
 const allFiles = require('../models/allFiles');
-const User = require('../models/user'); // Make sure this import is correct
+const User = require('../models/user');
 
 module.exports = (db, bucket) => {
     const files_collection = db.collection('uploads.files');
     const chunks_collection = db.collection('uploads.chunks');   
 
-    // Middleware to validate API key
     const validateApiKey = async (req, res, next) => {
         try {
             const authHeader = req.headers.authorization;
@@ -22,9 +21,8 @@ module.exports = (db, bucket) => {
                 return res.status(401).json({ error: 'API key required. Format: Bearer YOUR_API_KEY' });
             }
 
-            const apiKey = authHeader.substring(7); // Remove 'Bearer ' prefix
+            const apiKey = authHeader.substring(7); 
             
-            // Find user by API key
             const user = await User.findOne({ apiKey: apiKey });
             
             if (!user) {
@@ -39,7 +37,6 @@ module.exports = (db, bucket) => {
         }
     };
 
-    // Original web routes (keep existing)
     router.post('/upload/:id', upload.single('file'), async(req, res) => {
         if (!req.file) {
             return res.status(400).send("No file uploaded");
@@ -78,6 +75,11 @@ module.exports = (db, bucket) => {
     router.get('/download/:id', async(req, res) => {
         try {
             const fileId = req.params.id;
+            
+            const currentFile = await allFiles.findOne({fileId: new ObjectId(fileId)});
+            currentFile.downloads += 1;
+            await currentFile.save();
+
             const objectID = new ObjectId(fileId);
 
             const fileMetadata = await bucket.find({ _id: objectID }).toArray();
@@ -116,7 +118,12 @@ module.exports = (db, bucket) => {
 
     router.get('/inspect/:id', async(req, res) => {
         try {
-            const fileId = req.params.id;            
+            const fileId = req.params.id;
+
+            const currentFile = await allFiles.findOne({fileId: new ObjectId(fileId)});
+            currentFile.veiws += 1;
+            await currentFile.save();
+
             const objectID = new ObjectId(fileId);
 
             const downloadStream = bucket.openDownloadStream(objectID);

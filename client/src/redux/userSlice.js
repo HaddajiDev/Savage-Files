@@ -6,10 +6,25 @@ const link_files = process.env.REACT_APP_LINK_FILES
 
 export const userRegister = createAsyncThunk("user/signUp", async (user, { rejectWithValue }) => {
   try {
-    const result = await axios.post(link + "/register", user)
+    const result = await axios.post(link + "/send/add-email", user)
+    console.log("Registration result:", result)
     return result.data
   } catch (error) {
     return rejectWithValue(error.response.data)
+  }
+})
+
+export const resendVerificationEmail = createAsyncThunk ("user/resendEmail", async (_, {rejectWithValue}) => {
+  try {
+    
+    const result = await axios.post(link + "/resend/verification", null, { 
+      headers: {
+        Authorization: getCookie("token"),
+      },
+     })
+    return result.data
+  } catch (error) {
+    console.error("Error resending verification email:", error)
   }
 })
 
@@ -138,6 +153,91 @@ export const getStorageUsage = createAsyncThunk("user/getStorageUsage", async (u
     return rejectWithValue(error.response?.data || "Failed to fetch storage usage")
   }
 })
+
+// Update password (when user knows old password)
+export const updatePassword = createAsyncThunk(
+  "user/updatePassword",
+  async ({ oldPassword, newPassword }, { rejectWithValue }) => {
+    try {
+      const token = getCookie("token")
+      const result = await axios.put(
+        link + "/update-password",
+        { oldPassword, newPassword },
+        {
+          headers: {
+            Authorization: token,
+          },
+        }
+      )
+      return result.data
+    } catch (error) {
+      return rejectWithValue(error.response?.data || "Failed to update password")
+    }
+  }
+)
+
+export const resetPassword = createAsyncThunk(
+  "user/resetPassword",
+  async (email, { rejectWithValue }) => {
+    try {
+      const result = await axios.post(link + "/reset-password", { email })
+      return result.data
+    } catch (error) {
+      return rejectWithValue(error.response?.data || "Failed to send reset email")
+    }
+  }
+)
+
+export const setNewPasswordASY = createAsyncThunk(
+  "user/setNewPassword",
+  async ({ token, newPassword }, { rejectWithValue }) => {
+    try {
+      const result = await axios.post(link + "/set-new-password", {
+        token,
+        newPassword,
+      })
+      return result.data
+    } catch (error) {
+      return rejectWithValue(error.response?.data || "Failed to set new password")
+    }
+  }
+)
+
+
+export const sendVerifyNewEmail = createAsyncThunk(
+  "user/sendVerifyNewEmail",
+  async (newEmail, { rejectWithValue }) => {
+    try {
+      const result = await axios.post(
+        link + "/send/verify-new-email",
+        { newEmail },
+        {
+          headers: {
+            Authorization: getCookie("token"),
+          },
+        }
+      )
+      console.log("Send verify new email result:", result);
+      return result.data
+    } catch (error) {
+      return rejectWithValue(error.response?.data || "Failed to send verification email")
+    }
+  }
+)
+
+export const verifyNewEmail = createAsyncThunk(
+  "user/verifyNewEmail",
+  async (token, { rejectWithValue }) => {
+    try {
+      const result = await axios.get(link + "/verify-new-email", {
+        params: { token },
+      })
+      return result.data
+    } catch (error) {
+      return rejectWithValue(error.response?.data || "Failed to verify new email")
+    }
+  }
+)
 
 const initialState = {
   user: null,
@@ -299,6 +399,8 @@ export const userSlice = createSlice({
         state.status = "failed"
       })
 
+
+
       .addCase(getUserApiKey.pending, (state) => {
         state.loading = true
         state.error = ""
@@ -311,6 +413,8 @@ export const userSlice = createSlice({
         state.error = action.payload?.error || "Failed to fetch API key"
         state.loading = false
       })
+
+
 
       .addCase(getStorageUsage.pending, (state) => {
         state.loading = true
@@ -328,6 +432,107 @@ export const userSlice = createSlice({
         state.error = action.payload?.error || "Failed to fetch storage usage"
         state.loading = false
       })
+
+
+      .addCase(resendVerificationEmail.pending, (state) => {
+        state.status = "pending"
+        state.loading = true
+      })
+      .addCase(resendVerificationEmail.fulfilled, (state, action) => {
+        state.status = action.payload?.message || "Verification email resent"
+        state.loading = false
+      })
+      .addCase(resendVerificationEmail.rejected, (state, action) => {
+        state.status = "failed"
+        state.error = action.payload?.error || "Failed to resend verification email"
+        state.loading = false
+      })
+
+
+      .addCase(updatePassword.pending, (state) => {
+        state.status = "pending"
+        state.error = ""
+        state.loading = true
+      })
+      .addCase(updatePassword.fulfilled, (state, action) => {
+        state.status = "succeeded"
+        state.error = action.payload?.message || "Password updated successfully"
+        state.loading = false
+      })
+      .addCase(updatePassword.rejected, (state, action) => {
+        state.status = "failed"
+        state.error = action.payload?.error || "Failed to update password"
+        state.loading = false
+      })
+
+
+
+      .addCase(resetPassword.pending, (state) => {
+        state.status = "pending"
+        state.error = ""
+        state.loading = true
+      })
+      .addCase(resetPassword.fulfilled, (state) => {
+        state.status = "succeeded"
+        state.loading = false
+      })
+      .addCase(resetPassword.rejected, (state, action) => {
+        state.status = "failed"
+        state.error = action.payload?.error || "Failed to send reset email"
+        state.loading = false
+      })
+
+
+
+      .addCase(setNewPasswordASY.pending, (state) => {
+        state.status = "pending"
+        state.error = ""
+        state.loading = true
+      })
+      .addCase(setNewPasswordASY.fulfilled, (state, action) => {
+        state.status = "succeeded"
+        state.error = action.payload?.message || "Password has been reset successfully"
+        state.loading = false
+      })
+      .addCase(setNewPasswordASY.rejected, (state, action) => {
+        state.status = "failed"
+        state.error = action.payload?.error || "Failed to set new password"
+        state.loading = false
+      })
+
+
+      .addCase(sendVerifyNewEmail.pending, (state) => {
+        state.status = "pending"
+        state.error = ""
+        state.loading = true
+      })
+      .addCase(sendVerifyNewEmail.fulfilled, (state, action) => {
+        state.status = "succeeded"
+        state.loading = false
+      })
+      .addCase(sendVerifyNewEmail.rejected, (state, action) => {
+        state.status = "failed"
+        state.error = action.payload?.error || "Failed to send verification email"
+        state.loading = false
+      })
+
+
+      .addCase(verifyNewEmail.pending, (state) => {
+        state.status = "pending"
+        state.error = ""
+        state.loading = true
+      })
+      .addCase(verifyNewEmail.fulfilled, (state, action) => {
+        state.status = "succeeded"
+        state.loading = false     
+      })
+      .addCase(verifyNewEmail.rejected, (state, action) => {
+        state.status = "failed"
+        state.error = action.payload?.error || "Failed to verify new email"
+        state.loading = false
+      });
+
+
   },
 })
 
