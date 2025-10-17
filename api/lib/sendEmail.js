@@ -24,7 +24,7 @@ const sendVerificationEmail = async (email, userName, token) => {
             Hi <strong>${userName}</strong>,<br>
             Thank you for signing up. Please verify your account to get started and unlock all features.
           </p>
-          <a href="http://localhost:2000/user/confirm/add-email/${token}" style="
+          <a href="https://savage-files-cdn.vercel.app/user/confirm/add-email/${token}" style="
             background: linear-gradient(90deg, #2d0036 0%, #6f1e51 100%);
             color: #fff;
             padding: 14px 32px;
@@ -71,7 +71,7 @@ const sendPasswordResetEmail = async (email, userName, token) => {
               Hi <strong>${userName}</strong>,<br>
               Reset password. Please don't share the link with anyone.
             </p>
-            <a href="http://localhost:2000/user/verify-reset?token=${token}" style="
+            <a href="https://savage-files-cdn.vercel.app/user/verify-reset?token=${token}" style="
               background: linear-gradient(90deg, #2d0036 0%, #6f1e51 100%);
               color: #fff;
               padding: 14px 32px;
@@ -117,7 +117,7 @@ const sendConformationNewEmail = async (email, userName, token) => {
               Hi <strong>${userName}</strong>,<br>
               Verify your new email by clicking the link below.
             </p>
-            <a href="http://localhost:2000/user/verify-new-email?token=${token}" style="
+            <a href="https://savage-files-cdn.vercel.app/user/verify-new-email?token=${token}" style="
               background: linear-gradient(90deg, #2d0036 0%, #6f1e51 100%);
               color: #fff;
               padding: 14px 32px;
