@@ -1,6 +1,7 @@
 const express = require('express');
 const cors = require('cors');
 const mongoose = require("mongoose");
+const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
 const connect = require('./db_connect');
@@ -20,6 +21,22 @@ app.use(cors(corsOptions));
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
+const authLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000, // 15 minutes
+    max: 20,
+    message: { error: 'Too many requests, please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
+const generalLimiter = rateLimit({
+    windowMs: 15 * 60 * 1000,
+    max: 200,
+    message: { error: 'Too many requests, please try again later.' },
+    standardHeaders: true,
+    legacyHeaders: false,
+});
+
 //#region Connect to mongoDB
 const url = process.env.URI;
 const connect_2 = async () => {
@@ -37,7 +54,11 @@ const connect_2 = async () => {
 
 connect_2();
 const router = require('./routes/user')
-app.use('/user', router);
+app.use('/user/login', authLimiter);
+app.use('/user/register', authLimiter);
+app.use('/user/send', authLimiter);
+app.use('/user/reset-password', authLimiter);
+app.use('/user', generalLimiter, router);
 
 (async () => {
     try {
@@ -46,7 +67,7 @@ app.use('/user', router);
             bucketName: 'uploads'
         });
         
-        app.use('/files', fileRoutes(db, bucket));
+        app.use('/files', generalLimiter, fileRoutes(db, bucket));
         
 
         app.get("/", (req, res) => res.send("Working"));

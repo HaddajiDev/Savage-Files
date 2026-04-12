@@ -53,9 +53,9 @@ function SettingsModal({ isOpen, onClose }) {
 
     setIsLoading(true)
     setMessage("")
-    
+
     try {
-      // dispatch(sendVerifyNewEmail())
+      await dispatch(sendVerifyNewEmail(email)).unwrap()
       setMessage("Verification email sent! Please check your inbox.")
       setMessageType("success")
     } catch (error) {

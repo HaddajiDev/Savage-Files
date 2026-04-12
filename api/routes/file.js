@@ -5,9 +5,11 @@ const { Readable } = require('stream');
 const jwt = require('jsonwebtoken');
 const router = express.Router();
 const storage = multer.memoryStorage();
-const upload = multer({ storage });
 
-const isAuth = require('../middleware/passport');
+const WEB_FILE_SIZE_LIMIT = 5 * 1024 * 1024; // 5 MB
+const webUpload = multer({ storage, limits: { fileSize: WEB_FILE_SIZE_LIMIT } });
+const apiUpload = multer({ storage });
+
 const allFiles = require('../models/allFiles');
 const Folder = require('../models/folder');
 const User = require('../models/user');
@@ -53,20 +55,44 @@ module.exports = (db, bucket) => {
         }
     };
 
-    router.post('/upload/:id', upload.single('file'), async(req, res) => {
+    router.post('/upload/:id', (req, res, next) => {
+        webUpload.single('file')(req, res, (err) => {
+            if (err?.code === 'LIMIT_FILE_SIZE') {
+                return res.status(413).send(`File exceeds the ${WEB_FILE_SIZE_LIMIT / (1024 * 1024)} MB limit`);
+            }
+            if (err) return next(err);
+            next();
+        });
+    }, async(req, res) => {
         if (!req.file) {
             return res.status(400).send("No file uploaded");
         }
 
         try {
+            const userId = req.params.id;
+            const storageLimit = 1073741824; // 1 GB
+
+            const userFiles = await allFiles.find({ userId });
+            const b2Files = userFiles.filter(f => f.b2Key);
+            const gridFiles = userFiles.filter(f => !f.b2Key);
+            const b2Used = b2Files.reduce((sum, f) => sum + (f.sizeBytes || 0), 0);
+            let gridUsed = 0;
+            if (gridFiles.length > 0) {
+                const existingFiles = await files_collection.find({ _id: { $in: gridFiles.map(f => f.fileId) } }).toArray();
+                gridUsed = existingFiles.reduce((sum, f) => sum + (f.length || 0), 0);
+            }
+            if (b2Used + gridUsed + req.file.buffer.length > storageLimit) {
+                return res.status(413).send("Storage limit of 1 GB exceeded");
+            }
+
             const fileId = new ObjectId();
-            const b2Key = `savage-files/${req.params.id}/${req.file.originalname}`;
+            const b2Key = `savage-files/${userId}/${fileId}/${req.file.originalname}`;
 
             await uploadToB2(b2Key, req.file.buffer, req.file.mimetype);
 
             let newFile = new allFiles({
                 fileId: fileId,
-                userId: req.params.id,
+                userId: userId,
                 file_name: req.file.originalname,
                 size: FormatFileSize(req.file.buffer.length),
                 sizeBytes: req.file.buffer.length,
@@ -343,7 +369,7 @@ module.exports = (db, bucket) => {
         }
     });
 
-    router.post('/api/upload', validateApiKey, upload.single('file'), async (req, res) => {
+    router.post('/api/upload', validateApiKey, apiUpload.single('file'), async (req, res) => {
         if (!req.file) {
             return res.status(400).json({ error: "No file uploaded" });
         }
@@ -372,7 +398,7 @@ module.exports = (db, bucket) => {
             }
 
             const fileId = new ObjectId();
-            const b2Key = `savage-files/${req.apiUser._id}/${req.file.originalname}`;
+            const b2Key = `savage-files/${req.apiUser._id}/${fileId}/${req.file.originalname}`;
 
             await uploadToB2(b2Key, req.file.buffer, req.file.mimetype);
 

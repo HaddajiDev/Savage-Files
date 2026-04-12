@@ -6,7 +6,7 @@ const router = express.Router();
 const bcrypt = require('bcrypt');
 var jwt = require('jsonwebtoken');
 
-const {loginRules, registerRules, validation, UpdateRules} = require('../middleware/validator');
+const {loginRules, registerRules, validation} = require('../middleware/validator');
 const isAuth = require('../middleware/passport');
 const { send } = require('process');
 const pending = require('../models/pending');
