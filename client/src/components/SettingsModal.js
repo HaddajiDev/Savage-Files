@@ -1,7 +1,7 @@
 "use client"
 import { useState, useEffect } from "react"
 import { useSelector, useDispatch } from "react-redux"
-import { resendVerificationEmail, sendVerifyNewEmail, updatePassword } from "../redux/userSlice"
+import { sendVerifyNewEmail, updatePassword } from "../redux/userSlice"
 
 function SettingsModal({ isOpen, onClose }) {
   const user = useSelector((state) => state.user.user)

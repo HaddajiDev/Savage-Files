@@ -1254,8 +1254,12 @@ nav button:hover {
 
 .loginbtn:hover {
   background: linear-gradient(45deg, var(--accent-secondary), var(--accent-primary));
-  box-shadow: 0 0 15px rgba(138, 43, 226, 0.4);
-  transform: translateY(-2px);
+  box-shadow: 0 0 20px rgba(138, 43, 226, 0.5);
+}
+
+.loginbtn:active:not(:disabled) {
+  transform: scale(0.98);
+  box-shadow: 0 0 8px rgba(138, 43, 226, 0.3);
 }
 
 .loginbtn:disabled {
