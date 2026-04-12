@@ -18,6 +18,7 @@ const corsOptions = {
 
 app.use(cors(corsOptions));
 
+app.set('trust proxy', 1);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
