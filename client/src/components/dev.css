@@ -1,4 +1,4 @@
-/* CSS Variables */
+ 
 :root {
     --bg-primary: #121218;
     --bg-secondary: #1e1e2d;
@@ -17,7 +17,7 @@
     --transition: all 0.3s ease;
   }
   
-  /* Reset and Base Styles */
+   
   * {
     box-sizing: border-box;
   }
@@ -31,7 +31,7 @@
     line-height: 1.6;
   }
   
-  /* Layout Components */
+   
   .developer-dashboard {
     display: flex;
     flex-direction: column;
@@ -45,7 +45,7 @@
     padding: 0 1.5rem;
   }
   
-  /* Grid System */
+   
   .grid {
     display: grid;
     grid-template-columns: 1fr;
@@ -65,7 +65,7 @@
     }
   }
   
-  /* Typography */
+   
   h1,
   h2,
   h3,
@@ -125,7 +125,7 @@
     text-align: center;
   }
   
-  /* Spacing Utilities */
+   
   .mb-4 {
     margin-bottom: 1rem;
   }
@@ -189,7 +189,7 @@
     gap: 1rem;
   }
   
-  /* Flexbox Utilities */
+   
   .flex-container {
     display: flex;
   }
@@ -206,7 +206,7 @@
     flex-wrap: wrap;
   }
   
-  /* Width and Height */
+   
   .w-3 {
     width: 0.75rem;
   }
@@ -231,7 +231,7 @@
     height: 1.25rem;
   }
   
-  /* Card Components */
+   
   .card {
     background: linear-gradient(135deg, var(--bg-secondary) 0%, rgba(30, 30, 45, 0.8) 100%);
     border-radius: 1rem;
@@ -303,7 +303,7 @@
     margin: 0;
   }
   
-  /* API Key Section */
+   
   .api-key-section {
     text-align: center;
     padding: 2rem 1rem;
@@ -432,7 +432,7 @@
     box-shadow: 0 6px 20px rgba(138, 43, 226, 0.4);
   }
   
-  /* Buttons */
+   
   .action-button {
     display: flex;
     align-items: center;
@@ -499,7 +499,7 @@
     color: white;
   }
   
-  /* Storage Usage */
+   
   .storage-stats {
     display: grid;
     grid-template-columns: 1fr auto;
@@ -635,7 +635,7 @@
     left: 0;
   }
   
-  /* Code Blocks */
+   
   .inline-code {
     background-color: var(--bg-tertiary);
     border-radius: 0.25rem;
@@ -659,12 +659,12 @@
     border: 1px solid var(--border-color);
   }
   
-  /* Method Tags */
+   
   .rounded {
     border-radius: 0.25rem;
   }
   
-  /* Quick Start Guide */
+   
   .quick-start {
     background-color: var(--bg-secondary);
     border: 1px solid var(--border-color);
@@ -700,7 +700,7 @@
     flex-shrink: 0;
   }
   
-  /* Loading State */
+   
   .loading-container {
     display: flex;
     flex-direction: column;
@@ -733,7 +733,7 @@
     }
   }
   
-  /* SVG Icons */
+   
   svg {
     flex-shrink: 0;
   }
@@ -746,7 +746,7 @@
     color: var(--success);
   }
   
-  /* Responsive Design */
+   
   @media (max-width: 640px) {
     .main-content {
       padding: 0 1rem;
@@ -826,19 +826,19 @@
     }
   }
   
-  /* Focus States for Accessibility */
+   
   button:focus,
   input:focus {
     outline: 2px solid var(--accent-primary);
     outline-offset: 2px;
   }
   
-  /* Hover Effects */
+   
   .card:hover .text-secondary {
     color: var(--text-primary);
   }
   
-  /* Custom Scrollbar */
+   
   ::-webkit-scrollbar {
     width: 8px;
     height: 8px;
@@ -858,7 +858,7 @@
     background: var(--accent-hover);
   }
   
-  /* Print Styles */
+   
   @media print {
     .developer-dashboard {
       background: white;

@@ -21,7 +21,7 @@ function Auth() {
 
   const { status, error } = useSelector((state) => state.user)
 
-  // Password validation states
+  
   const [passwordErrors, setPasswordErrors] = useState({
     length: false,
     uppercase: false,
@@ -32,7 +32,7 @@ function Auth() {
   const [isPasswordValid, setIsPasswordValid] = useState(false)
   const [showPasswordRequirements, setShowPasswordRequirements] = useState(false)
 
-  // Countdown timer effect
+  
   useEffect(() => {
     if (countdown > 0) {
       const timer = setTimeout(() => setCountdown(countdown - 1), 1000)
@@ -40,7 +40,7 @@ function Auth() {
     }
   }, [countdown])
 
-  // Validate password whenever password changes in signup mode
+  
   useEffect(() => {
     if (!isLogin) {
       const errors = {
@@ -271,7 +271,7 @@ function Auth() {
     )
   }
 
-  // Render normal auth form
+  
   return (
     <div className="login-container">
       <div className="login-box">
@@ -330,7 +330,6 @@ function Auth() {
             className={!isLogin && user.password && !isPasswordValid ? 'password-error' : ''}
           />
 
-          {/* Password Requirements for Sign Up */}
           {!isLogin && showPasswordRequirements && (
             <div className="password-requirements">
               <p className="requirements-title">Password must contain:</p>

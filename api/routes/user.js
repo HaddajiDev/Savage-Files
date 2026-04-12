@@ -27,9 +27,11 @@ router.post("/register", registerRules(), validation, async (request, result) =>
         const hashed_password = await bcrypt.hash(request.body.password, genSalt);		
 
         let newUser = new User({
-            ...request.body,
+            username: request.body.username,
+            email: request.body.email,
             password: hashed_password,
-            verified: false
+            verified: false,
+            emailVerified: false
         });
 
         let res = await newUser.save();
@@ -88,35 +90,23 @@ router.post('/login', loginRules(), validation, async (request, result) => {
     }
 });
 
-router.get('/generate', async (req, res) => {
-    const { id } = req.query;
-    try {
-        const search = await User.findOne({ _id: id });
-        if (!search) return res.status(404).send({ error: 'User not found' });
-        const payload = { username: search.username };
-        const token = await jwt.sign(payload, process.env.SCTY_KEY, { expiresIn: '7d' });
-        res.status(200).send({ token: `bearer ${token}` });
-    } catch (error) {
-        res.status(500).send({ error: 'Internal server error' });
-    }
-});
 
 router.get('/current', isAuth(), (request, result) => {    
     result.status(200).send({user: request.user});
 });
 
-// register
+
 router.post('/send/add-email', async (req, res) => {
     try {
         const { email, username, password } = req.body;
 
         const search = await User.findOne({ username: username });
         if (search) {
-            return res.send({error :'username already exists'});
+            return res.status(400).send({error :'username already exists'});
         }
         const emailSearch = await User.findOne({ email: email });
         if (emailSearch) {
-            return res.send({error :'email already exists'});
+            return res.status(400).send({error :'email already exists'});
         }
 
         const salt = 10;
@@ -166,7 +156,7 @@ router.post('/send/add-email', async (req, res) => {
     }
 });
 
-// verify email
+
 router.get('/confirm/add-email/:token', async (req, res) => {
     try {
         const decoded = jwt.verify(
@@ -194,7 +184,7 @@ router.get('/confirm/add-email/:token', async (req, res) => {
     }
 });
 
-// resend verification email
+
 router.post("/resend/verification", isAuth(), async (req, res) => {
     try {
         
@@ -228,7 +218,7 @@ router.post("/resend/verification", isAuth(), async (req, res) => {
     }
 })
 
-// if password is not forgotten
+
 router.put('/update-password', isAuth(), async (req, res) => {
     try {
         const { oldPassword, newPassword } = req.body;        
@@ -253,7 +243,7 @@ router.put('/update-password', isAuth(), async (req, res) => {
     }
 });
 
-//forgot password
+
 router.post('/reset-password', async (req, res) => {
     try {
         const { email } = req.body;
@@ -285,7 +275,7 @@ router.post('/reset-password', async (req, res) => {
     }
 });
 
-// if password is forgotten
+
 router.post('/set-new-password', async (req, res) => {
     try {
         const { token, newPassword } = req.body;
@@ -297,21 +287,28 @@ router.post('/set-new-password', async (req, res) => {
         if (!user) {
             return res.status(404).send({ error: 'Invalid or expired reset link' });
         }
+
+        
+        if (user.passwordChangedAt && decoded.iat * 1000 < user.passwordChangedAt.getTime()) {
+            return res.status(400).send({ error: 'Reset link has already been used' });
+        }
+
         const salt = 10;
         const genSalt = await bcrypt.genSalt(salt);
         const hashed_password = await bcrypt.hash(newPassword, genSalt);
 
         user.password = hashed_password;
+        user.passwordChangedAt = new Date();
         await user.save();
 
-        res.send("Mrigl");
+        res.status(200).send({ message: 'Password reset successfully' });
     } catch (error) {
         console.error('Set new password error:', error);
         res.status(500).send({ error: 'Failed to reset password' });
     }
 });
 
-//email link to reset password
+
 router.get('/verify-reset', async (req, res) => {
     try {
         const { token } = req.query;
@@ -331,12 +328,11 @@ router.get('/verify-reset', async (req, res) => {
 
     } catch (error) {
         console.error('Verify reset error:', error);
-        res.send('Failed to verify token');
+        res.status(400).send({ error: 'Invalid or expired reset link' });
     }
 });
 
 
-// send verify new email
 router.post('/send/verify-new-email', isAuth(), async (req, res) => {
     try {
         const {newEmail } = req.body;
@@ -382,7 +378,6 @@ router.get('/verify-new-email', async (req, res) => {
         res.status(500).send({ error: 'Failed to confirm new email' });
     }
 });
-
 
 
 router.post('/api-key/generate', isAuth(), async (req, res) => {

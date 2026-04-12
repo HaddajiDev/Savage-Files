@@ -75,6 +75,60 @@ export const uploadFile = createAsyncThunk("user/upload", async ({ userId, file 
   }
 })
 
+export const GetUserFolders = createAsyncThunk("user/folders", async (userId, { rejectWithValue }) => {
+  try {
+    const result = await axios.get(link_files + `/folders/${userId}`)
+    return result.data
+  } catch (error) {
+    return rejectWithValue(error.response?.data || "Failed to get folders")
+  }
+})
+
+export const CreateFolder = createAsyncThunk("user/createFolder", async ({ userId, name }, { rejectWithValue }) => {
+  try {
+    const result = await axios.post(link_files + `/folders/create`, { userId, name })
+    return result.data
+  } catch (error) {
+    return rejectWithValue(error.response?.data || "Failed to create folder")
+  }
+})
+
+export const DeleteFolder = createAsyncThunk("user/deleteFolder", async ({ folderId, userId }, { rejectWithValue }) => {
+  try {
+    const result = await axios.delete(link_files + `/folders/${folderId}/${userId}`)
+    return result.data
+  } catch (error) {
+    return rejectWithValue(error.response?.data || "Failed to delete folder")
+  }
+})
+
+export const RenameFolder = createAsyncThunk("user/renameFolder", async ({ folderId, userId, name }, { rejectWithValue }) => {
+  try {
+    const result = await axios.put(link_files + `/folders/rename/${folderId}`, { userId, name })
+    return result.data
+  } catch (error) {
+    return rejectWithValue(error.response?.data || "Failed to rename folder")
+  }
+})
+
+export const ToggleVisibility = createAsyncThunk("user/toggleVisibility", async ({ fileId, userId }, { rejectWithValue }) => {
+  try {
+    const result = await axios.put(link_files + `/visibility/${fileId}`, { userId })
+    return { fileId, isPublic: result.data.isPublic }
+  } catch (error) {
+    return rejectWithValue(error.response?.data || "Failed to update visibility")
+  }
+})
+
+export const MoveFile = createAsyncThunk("user/moveFile", async ({ fileId, userId, folderId }, { rejectWithValue }) => {
+  try {
+    const result = await axios.put(link_files + `/move/${fileId}`, { userId, folderId })
+    return result.data
+  } catch (error) {
+    return rejectWithValue(error.response?.data || "Failed to move file")
+  }
+})
+
 export const DeleteFile = createAsyncThunk("user/delete", async ({ fileId, userId }, { rejectWithValue }) => {
   try {
     const result = await axios.delete(link_files + `/delete/${fileId}/${userId}`)
@@ -95,15 +149,6 @@ export const inspect = createAsyncThunk("user/inspect", async (fileId, { rejectW
     return result.data
   } catch (error) {
     return rejectWithValue(error.response?.data || "Failed to inspect file")
-  }
-})
-
-export const GenerateToken = createAsyncThunk("user/generateToken", async (userId, { rejectWithValue }) => {
-  try {
-    const result = await axios.get(`${link}/generate?id=${userId}`)
-    return result.data
-  } catch (error) {
-    return rejectWithValue(error.response?.data || "Unknown error")
   }
 })
 
@@ -242,6 +287,7 @@ export const verifyNewEmail = createAsyncThunk(
 const initialState = {
   user: null,
   files: null,
+  folders: [],
   apiKey: null,
   storageUsage: {
     used: 0,
@@ -260,6 +306,7 @@ export const userSlice = createSlice({
     logout(state) {
       eraseCookie("token")
       state.files = null
+      state.folders = []
       state.user = null
       state.apiKey = null
       state.storageUsage = {
@@ -366,20 +413,6 @@ export const userSlice = createSlice({
       .addCase(DeleteFile.rejected, (state, action) => {
         state.status = "failed"
         state.error = action.payload || "Delete failed"
-        state.loading = false
-      })
-
-      .addCase(GenerateToken.pending, (state) => {
-        state.status = "pending"
-        state.loading = true
-      })
-      .addCase(GenerateToken.fulfilled, (state) => {
-        state.status = "succeeded"
-        state.loading = false
-      })
-      .addCase(GenerateToken.rejected, (state, action) => {
-        state.status = "failed"
-        state.error = action.payload || "Token generation failed"
         state.loading = false
       })
 
@@ -530,6 +563,31 @@ export const userSlice = createSlice({
         state.status = "failed"
         state.error = action.payload?.error || "Failed to verify new email"
         state.loading = false
+      })
+
+      .addCase(ToggleVisibility.fulfilled, (state, action) => {
+        if (state.files) {
+          const file = state.files.find(f => String(f.ID) === String(action.payload.fileId))
+          if (file) file.isPublic = action.payload.isPublic
+        }
+      })
+
+      .addCase(GetUserFolders.fulfilled, (state, action) => {
+        state.folders = action.payload?.folders || []
+      })
+      .addCase(CreateFolder.fulfilled, (state, action) => {
+        if (action.payload?.folder) {
+          state.folders = [action.payload.folder, ...state.folders]
+        }
+      })
+      .addCase(DeleteFolder.fulfilled, (state, action) => {
+        // folders refreshed on page after delete
+      })
+      .addCase(RenameFolder.fulfilled, (state, action) => {
+        if (action.payload?.folder) {
+          const idx = state.folders.findIndex(f => f._id === action.payload.folder._id)
+          if (idx !== -1) state.folders[idx] = action.payload.folder
+        }
       });
 
 

@@ -8,10 +8,6 @@ const transporter = nodemailer.createTransport({
     }
 });
 
-const generateVerificationCode = () => {
-    return Math.floor(100000 + Math.random() * 900000).toString(); 
-};
-
 const sendVerificationEmail = async (email, userName, token) => {
     const mailOptions = {
         from: process.env.EMAIL,
@@ -109,7 +105,7 @@ const sendConformationNewEmail = async (email, userName, token) => {
     const mailOptions = {
         from: process.env.EMAIL,
         to: email,
-        subject: 'Password Reset Code for Savage Files',
+        subject: 'Verify your new email for Savage Files',
         html: `
           <div style="background: #12001a; padding: 36px 24px; border-radius: 12px; max-width: 420px; margin: 0 auto; box-shadow: 0 8px 32px rgba(60,0,90,0.25); font-family: 'Segoe UI', Arial, sans-serif; color: #e0d6f6;">
             <h2 style="color: #d1aaff; margin-top: 0; letter-spacing: 1px;">Welcome to Savage Files!</h2>
@@ -153,7 +149,6 @@ const sendConformationNewEmail = async (email, userName, token) => {
 
 module.exports = {
     sendVerificationEmail,
-    generateVerificationCode,
     sendPasswordResetEmail,
     sendConformationNewEmail
 };

@@ -2,13 +2,29 @@ const express = require('express');
 const { ObjectId } = require('mongodb');
 const multer = require('multer');
 const { Readable } = require('stream');
+const jwt = require('jsonwebtoken');
 const router = express.Router();
 const storage = multer.memoryStorage();
 const upload = multer({ storage });
 
 const isAuth = require('../middleware/passport');
 const allFiles = require('../models/allFiles');
+const Folder = require('../models/folder');
 const User = require('../models/user');
+const { uploadToB2, downloadFromB2, deleteFromB2 } = require('../b2');
+
+
+function verifyToken(req) {
+    try {
+        const fromHeader = req.headers.authorization;
+        const fromQuery  = req.query.token;
+        const raw = (fromHeader || fromQuery || '').replace(/^bearer\s+/i, '').trim();
+        if (!raw) return null;
+        return jwt.verify(raw, process.env.SCTY_KEY);
+    } catch {
+        return null;
+    }
+}
 
 module.exports = (db, bucket) => {
     const files_collection = db.collection('uploads.files');
@@ -43,29 +59,23 @@ module.exports = (db, bucket) => {
         }
 
         try {
-            const readableStream = new Readable();
-            readableStream.push(req.file.buffer);
-            readableStream.push(null);
+            const fileId = new ObjectId();
+            const b2Key = `savage-files/${req.params.id}/${req.file.originalname}`;
 
-            const uploadStream = bucket.openUploadStream(req.file.originalname);
+            await uploadToB2(b2Key, req.file.buffer, req.file.mimetype);
 
-            readableStream.pipe(uploadStream)
-                .on('error', (error) => {
-                    console.error('Error uploading file:', error);
-                    return res.status(500).send("File upload failed");
-                })
-                .on('finish', async() => {
-                    let newFile = new allFiles({
-                        fileId: uploadStream.id,
-                        userId: req.params.id,
-                        file_name: uploadStream.filename,
-                        size: `${FormatFileSize(uploadStream.length)}`
-                    });
-                    await newFile.save();
-                    const fileId = encrypt(uploadStream.id.toString(), process.env.SCTY_KEY.toString());
-                    res.status(200).send({fileId: fileId});
-                });
+            let newFile = new allFiles({
+                fileId: fileId,
+                userId: req.params.id,
+                file_name: req.file.originalname,
+                size: FormatFileSize(req.file.buffer.length),
+                sizeBytes: req.file.buffer.length,
+                b2Key: b2Key,
+            });
+            await newFile.save();
 
+            const encryptedId = encrypt(fileId.toString(), process.env.SCTY_KEY.toString());
+            res.status(200).send({fileId: encryptedId});
         } catch (error) {
             console.error('Error during file upload:', error);
             res.status(500).send("Error during file upload");
@@ -75,41 +85,36 @@ module.exports = (db, bucket) => {
     router.get('/download/:id', async(req, res) => {
         try {
             const fileId = req.params.id;
-            
-            const currentFile = await allFiles.findOne({fileId: new ObjectId(fileId)});
+            const objectID = new ObjectId(fileId);
+
+            const currentFile = await allFiles.findOne({fileId: objectID});
+            if (!currentFile) return res.status(404).send('File not found.');
+
+            if (!currentFile.isPublic) {
+                const payload = verifyToken(req);
+                if (!payload) return res.status(401).send('This file is private.');
+                const owner = await User.findOne({ username: payload.username });
+                if (!owner || owner._id.toString() !== currentFile.userId.toString()) {
+                    return res.status(403).send('Access denied.');
+                }
+            }
+
             currentFile.downloads += 1;
             await currentFile.save();
 
-            const objectID = new ObjectId(fileId);
+            res.setHeader('Content-Disposition', `attachment; filename="${currentFile.file_name}"`);
+            res.setHeader('Content-Type', 'application/octet-stream');
 
-            const fileMetadata = await bucket.find({ _id: objectID }).toArray();
-
-            if (fileMetadata.length === 0) {
-                return res.status(404).send('File not found.');
+            if (currentFile.b2Key) {
+                const b2Response = await downloadFromB2(currentFile.b2Key);
+                b2Response.Body.pipe(res);
+            } else {
+                const fileMetadata = await bucket.find({ _id: objectID }).toArray();
+                if (fileMetadata.length === 0) return res.status(404).send('File not found.');
+                const downloadStream = bucket.openDownloadStream(objectID);
+                downloadStream.on('error', () => res.status(404).send('File not found.'));
+                downloadStream.pipe(res);
             }
-
-            const file = fileMetadata[0];
-            const fileName = file.filename || 'downloaded-file';
-            const contentType = file.contentType || 'application/octet-stream';
-
-            res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-            res.setHeader('Content-Type', contentType);
-
-            const downloadStream = bucket.openDownloadStream(objectID);
-
-            downloadStream.on('data', (chunk) => {
-                res.write(chunk);
-            });
-
-            downloadStream.on('end', () => {
-                res.end();
-            });
-
-            downloadStream.on('error', (err) => {
-                console.error('Error downloading file:', err);
-                res.status(404).send('File not found.');
-            });
-
         } catch (error) {
             console.error('Error downloading file:', error);
             res.status(500).send('Error downloading file.');
@@ -119,28 +124,32 @@ module.exports = (db, bucket) => {
     router.get('/inspect/:id', async(req, res) => {
         try {
             const fileId = req.params.id;
+            const objectID = new ObjectId(fileId);
 
-            const currentFile = await allFiles.findOne({fileId: new ObjectId(fileId)});
+            const currentFile = await allFiles.findOne({fileId: objectID});
+            if (!currentFile) return res.status(404).send(`<h1>File not Found</h1>`);
+
+            if (!currentFile.isPublic) {
+                const payload = verifyToken(req);
+                if (!payload) return res.status(401).send('<h1>This file is private.</h1>');
+                const owner = await User.findOne({ username: payload.username });
+                if (!owner || owner._id.toString() !== currentFile.userId.toString()) {
+                    return res.status(403).send('<h1>Access denied.</h1>');
+                }
+            }
+
             currentFile.veiws += 1;
             await currentFile.save();
 
-            const objectID = new ObjectId(fileId);
-
-            const downloadStream = bucket.openDownloadStream(objectID);
-
-            downloadStream.on('data', (chunk) => {
-                res.write(chunk);
-            });
-
-            downloadStream.on('end', () => {
-                res.end();
-            });
-
-            downloadStream.on('error', (err) => {
-                res.status(404).send(`<h1>File not Found</h1>`);
-            });       
-
-        } catch (error) {            
+            if (currentFile.b2Key) {
+                const b2Response = await downloadFromB2(currentFile.b2Key);
+                b2Response.Body.pipe(res);
+            } else {
+                const downloadStream = bucket.openDownloadStream(objectID);
+                downloadStream.on('error', () => res.status(404).send(`<h1>File not Found</h1>`));
+                downloadStream.pipe(res);
+            }
+        } catch (error) {
             res.status(500).send('Error downloading file.');
         }
     });
@@ -148,25 +157,17 @@ module.exports = (db, bucket) => {
     router.get('/all/:id', async(req, res) => {
         try {
             const userfiles = await allFiles.find({userId: req.params.id});
-            const files = await files_collection.find({
-                _id: { $in: userfiles.map(file => file.fileId) }
-            }).toArray();
-
-            const fileDataMap = files.reduce((acc, fileDoc) => {
-                acc[fileDoc._id.toString()] = fileDoc; 
-                return acc;
-            }, {});
 
             const fileList = userfiles.map(userFileEntry => {
-                const fileDoc = fileDataMap[userFileEntry.fileId.toString()];
-                
                 return {
                     ID: userFileEntry.fileId,
                     Filename: userFileEntry.file_name,
                     views: userFileEntry.veiws,
                     downloads: userFileEntry.downloads,
-                    size: userFileEntry.size,                    
-                    CreatedAt: fileDoc.uploadDate 
+                    size: userFileEntry.size,
+                    folderId: userFileEntry.folderId || null,
+                    isPublic: userFileEntry.isPublic,
+                    CreatedAt: userFileEntry.createdAt
                 };
             });
 
@@ -177,30 +178,123 @@ module.exports = (db, bucket) => {
         }
     });
 
+    
+    router.put('/visibility/:fileId', async (req, res) => {
+        try {
+            const { userId } = req.body;
+            const objectID = new ObjectId(req.params.fileId);
+            const file = await allFiles.findOne({ fileId: objectID, userId });
+            if (!file) return res.status(404).send({ error: 'File not found' });
+            file.isPublic = !file.isPublic;
+            await file.save();
+            res.status(200).send({ isPublic: file.isPublic });
+        } catch (error) {
+            console.error(error);
+            res.status(500).send({ error: 'Error updating visibility' });
+        }
+    });
+
+    
+    router.post('/folders/create', async (req, res) => {
+        try {
+            const { userId, name } = req.body;
+            if (!userId || !name || !name.trim()) {
+                return res.status(400).send({ error: 'userId and name are required' });
+            }
+            const folder = new Folder({ userId, name: name.trim() });
+            await folder.save();
+            res.status(200).send({ folder });
+        } catch (error) {
+            console.error(error);
+            res.status(500).send({ error: 'Error creating folder' });
+        }
+    });
+
+    router.get('/folders/:userId', async (req, res) => {
+        try {
+            const folders = await Folder.find({ userId: req.params.userId }).sort({ createdAt: -1 });
+            res.status(200).send({ folders });
+        } catch (error) {
+            console.error(error);
+            res.status(500).send({ error: 'Error loading folders' });
+        }
+    });
+
+    router.delete('/folders/:folderId/:userId', async (req, res) => {
+        try {
+            const folder = await Folder.findOne({ _id: req.params.folderId, userId: req.params.userId });
+            if (!folder) return res.status(404).send({ error: 'Folder not found' });
+
+            
+            await allFiles.updateMany({ folderId: folder._id }, { $set: { folderId: null } });
+            await Folder.deleteOne({ _id: folder._id });
+            res.status(200).send({ message: 'Folder deleted' });
+        } catch (error) {
+            console.error(error);
+            res.status(500).send({ error: 'Error deleting folder' });
+        }
+    });
+
+    router.put('/folders/rename/:folderId', async (req, res) => {
+        try {
+            const { userId, name } = req.body;
+            if (!name || !name.trim()) return res.status(400).send({ error: 'Name is required' });
+            const folder = await Folder.findOneAndUpdate(
+                { _id: req.params.folderId, userId },
+                { name: name.trim() },
+                { new: true }
+            );
+            if (!folder) return res.status(404).send({ error: 'Folder not found' });
+            res.status(200).send({ folder });
+        } catch (error) {
+            console.error(error);
+            res.status(500).send({ error: 'Error renaming folder' });
+        }
+    });
+
+    router.put('/move/:fileId', async (req, res) => {
+        try {
+            const { userId, folderId } = req.body;
+            const objectID = new ObjectId(req.params.fileId);
+            const file = await allFiles.findOne({ fileId: objectID, userId });
+            if (!file) return res.status(404).send({ error: 'File not found' });
+
+            if (folderId) {
+                const folder = await Folder.findOne({ _id: folderId, userId });
+                if (!folder) return res.status(404).send({ error: 'Folder not found' });
+                file.folderId = folder._id;
+            } else {
+                file.folderId = null;
+            }
+            await file.save();
+            res.status(200).send({ message: 'File moved' });
+        } catch (error) {
+            console.error(error);
+            res.status(500).send({ error: 'Error moving file' });
+        }
+    });
+
     router.delete('/delete/:file/:userId', async (req, res) => {
         try {
             const idField = new ObjectId(req.params.file);
-
-            const file = await files_collection.findOne({ _id: idField });
-            if (!file) {
-                return res.status(404).send("File not found");
-            }
 
             const currentFile = await allFiles.findOne({fileId: idField});
             if (!currentFile || currentFile.userId.toString() !== req.params.userId.toString()) {
                 return res.status(404).send(`<h1>Not Authorized</h1>`);
             }
 
-            await allFiles.deleteOne({fileId: idField});
-            const result = await files_collection.deleteOne({ _id: idField });
-            await chunks_collection.deleteMany({ files_id: idField });
-    
-            if (result.deletedCount > 0) {
-                return res.status(200).send("File deleted");
+            if (currentFile.b2Key) {
+                await deleteFromB2(currentFile.b2Key);
             } else {
-                return res.status(500).send("error deleting file");
+                const result = await files_collection.deleteOne({ _id: idField });
+                await chunks_collection.deleteMany({ files_id: idField });
+                if (result.deletedCount === 0) {
+                    return res.status(500).send("error deleting file from storage");
+                }
             }
-    
+
+            await allFiles.deleteOne({fileId: idField});
+            return res.status(200).send("File deleted");
         } catch (error) {
             console.error("Error deleting file:", error);
             return res.status(500).send("Server error occurred while deleting the file");
@@ -210,40 +304,38 @@ module.exports = (db, bucket) => {
     router.get('/storage/:userId', async (req, res) => {
         try {
             const userId = req.params.userId;
-            
+            const storageLimit = 1073741824; 
+
             const userFiles = await allFiles.find({ userId: userId });
-            
+
             if (userFiles.length === 0) {
-                return res.status(200).send({
-                    used: 0,
-                    total: 1073741824,
-                    fileCount: 0,
-                    files: []
-                });
+                return res.status(200).send({ used: 0, total: storageLimit, fileCount: 0, files: [] });
             }
 
-            const fileIds = userFiles.map(file => file.fileId);
-            const files = await files_collection.find({
-                _id: { $in: fileIds }
-            }).toArray();
+            const b2Files = userFiles.filter(f => f.b2Key);
+            const gridFiles = userFiles.filter(f => !f.b2Key);
 
-            const totalUsed = files.reduce((sum, file) => sum + (file.length || 0), 0);
-            const storageLimit = 1073741824; // 1GB in bytes
+            const b2Used = b2Files.reduce((sum, f) => sum + (f.sizeBytes || 0), 0);
 
-            const storageData = {
+            let gridUsed = 0;
+            let gridDocs = [];
+            if (gridFiles.length > 0) {
+                const fileIds = gridFiles.map(f => f.fileId);
+                gridDocs = await files_collection.find({ _id: { $in: fileIds } }).toArray();
+                gridUsed = gridDocs.reduce((sum, f) => sum + (f.length || 0), 0);
+            }
+
+            const totalUsed = b2Used + gridUsed;
+
+            res.status(200).send({
                 used: totalUsed,
                 total: storageLimit,
-                fileCount: files.length,
-                files: files.map(file => ({
-                    id: file._id,
-                    filename: file.filename,
-                    size: file.length,
-                    uploadDate: file.uploadDate,
-                    contentType: file.contentType
-                }))
-            };
-
-            res.status(200).send(storageData);
+                fileCount: userFiles.length,
+                files: [
+                    ...b2Files.map(f => ({ id: f.fileId, filename: f.file_name, size: f.sizeBytes, uploadDate: f.createdAt, contentType: 'application/octet-stream' })),
+                    ...gridDocs.map(f => ({ id: f._id, filename: f.filename, size: f.length, uploadDate: f.uploadDate, contentType: f.contentType }))
+                ]
+            });
 
         } catch (error) {
             console.error('Error fetching storage usage:', error);
@@ -258,56 +350,53 @@ module.exports = (db, bucket) => {
 
         try {
             const userFiles = await allFiles.find({ userId: req.apiUser._id });
-            const fileIds = userFiles.map(file => file.fileId);
-            const existingFiles = await files_collection.find({
-                _id: { $in: fileIds }
-            }).toArray();
-            
-            const currentUsage = existingFiles.reduce((sum, file) => sum + (file.length || 0), 0);
-            const storageLimit = 1073741824; // 1GB
-            
+            const storageLimit = 1073741824; 
+
+            const b2Files = userFiles.filter(f => f.b2Key);
+            const gridFiles = userFiles.filter(f => !f.b2Key);
+            const b2Used = b2Files.reduce((sum, f) => sum + (f.sizeBytes || 0), 0);
+            let gridUsed = 0;
+            if (gridFiles.length > 0) {
+                const existingFiles = await files_collection.find({ _id: { $in: gridFiles.map(f => f.fileId) } }).toArray();
+                gridUsed = existingFiles.reduce((sum, f) => sum + (f.length || 0), 0);
+            }
+            const currentUsage = b2Used + gridUsed;
+
             if (currentUsage + req.file.buffer.length > storageLimit) {
-                return res.status(413).json({ 
+                return res.status(413).json({
                     error: "Storage limit exceeded",
-                    currentUsage: currentUsage,
+                    currentUsage,
                     limit: storageLimit,
                     fileSize: req.file.buffer.length
                 });
             }
 
-            const readableStream = new Readable();
-            readableStream.push(req.file.buffer);
-            readableStream.push(null);
+            const fileId = new ObjectId();
+            const b2Key = `savage-files/${req.apiUser._id}/${req.file.originalname}`;
 
-            const uploadStream = bucket.openUploadStream(req.file.originalname);
+            await uploadToB2(b2Key, req.file.buffer, req.file.mimetype);
 
-            readableStream.pipe(uploadStream)
-                .on('error', (error) => {
-                    console.error('Error uploading file:', error);
-                    return res.status(500).json({ error: "File upload failed" });
-                })
-                .on('finish', async () => {
-                    try {
-                        let newFile = new allFiles({
-                            fileId: uploadStream.id,
-                            userId: req.apiUser._id,
-                            file_name: uploadStream.filename,
-                            size: `${FormatFileSize(uploadStream.length)}`
-                        });
-                        await newFile.save();
-                        
-                        res.status(200).json({
-                            success: true,
-                            fileId: uploadStream.id.toString(),
-                            filename: uploadStream.filename,
-                            size: FormatFileSize(uploadStream.length),
-                            uploadDate: new Date().toISOString()
-                        });
-                    } catch (saveError) {
-                        console.error('Error saving file metadata:', saveError);
-                        res.status(500).json({ error: "Error saving file metadata" });
-                    }
-                });
+            const isPrivate = req.body.private === 'true' || req.body.private === true;
+
+            const newFile = new allFiles({
+                fileId: fileId,
+                userId: req.apiUser._id,
+                file_name: req.file.originalname,
+                size: FormatFileSize(req.file.buffer.length),
+                sizeBytes: req.file.buffer.length,
+                b2Key: b2Key,
+                isPublic: !isPrivate,
+            });
+            await newFile.save();
+
+            res.status(200).json({
+                success: true,
+                fileId: fileId.toString(),
+                filename: req.file.originalname,
+                size: FormatFileSize(req.file.buffer.length),
+                isPublic: !isPrivate,
+                uploadDate: new Date().toISOString()
+            });
 
         } catch (error) {
             console.error('Error during file upload:', error);
@@ -318,25 +407,13 @@ module.exports = (db, bucket) => {
     router.get('/api/files', validateApiKey, async (req, res) => {
         try {
             const userFiles = await allFiles.find({ userId: req.apiUser._id });
-            
-            if (userFiles.length === 0) {
-                return res.status(200).json({
-                    success: true,
-                    files: [],
-                    count: 0
-                });
-            }
 
-            const files = await files_collection.find({
-                _id: { $in: userFiles.map(file => file.fileId) }
-            }).toArray();
-
-            const fileList = files.map(file => ({
-                id: file._id.toString(),
-                filename: file.filename,
-                size: FormatFileSize(file.length),
-                uploadDate: file.uploadDate,
-                contentType: file.contentType || 'application/octet-stream'
+            const fileList = userFiles.map(f => ({
+                id: f.fileId.toString(),
+                filename: f.file_name,
+                size: f.size,
+                uploadDate: f.createdAt,
+                isPublic: f.isPublic,
             }));
 
             res.status(200).json({
@@ -369,28 +446,24 @@ module.exports = (db, bucket) => {
                 return res.status(404).json({ error: 'File not found or access denied' });
             }
 
-            const fileMetadata = await bucket.find({ _id: objectID }).toArray();
-            if (fileMetadata.length === 0) {
-                return res.status(404).json({ error: 'File not found in storage' });
-            }
+            res.setHeader('Content-Disposition', `attachment; filename="${userFile.file_name}"`);
+            res.setHeader('Content-Type', 'application/octet-stream');
 
-            const file = fileMetadata[0];
-            const fileName = file.filename || 'downloaded-file';
-            const contentType = file.contentType || 'application/octet-stream';
-
-            res.setHeader('Content-Disposition', `attachment; filename="${fileName}"`);
-            res.setHeader('Content-Type', contentType);
-
-            const downloadStream = bucket.openDownloadStream(objectID);
-            
-            downloadStream.on('error', (err) => {
-                console.error('Error downloading file:', err);
-                if (!res.headersSent) {
-                    res.status(500).json({ error: 'Error streaming file' });
+            if (userFile.b2Key) {
+                const b2Response = await downloadFromB2(userFile.b2Key);
+                b2Response.Body.pipe(res);
+            } else {
+                const fileMetadata = await bucket.find({ _id: objectID }).toArray();
+                if (fileMetadata.length === 0) {
+                    return res.status(404).json({ error: 'File not found in storage' });
                 }
-            });
-
-            downloadStream.pipe(res);
+                const downloadStream = bucket.openDownloadStream(objectID);
+                downloadStream.on('error', (err) => {
+                    console.error('Error downloading file:', err);
+                    if (!res.headersSent) res.status(500).json({ error: 'Error streaming file' });
+                });
+                downloadStream.pipe(res);
+            }
 
         } catch (error) {
             console.error('Error downloading file:', error);
@@ -419,19 +492,18 @@ module.exports = (db, bucket) => {
                 return res.status(404).json({ error: 'File not found or access denied' });
             }
 
-            await allFiles.deleteOne({ fileId: objectID });
-            
-            const deleteResult = await files_collection.deleteOne({ _id: objectID });
-            await chunks_collection.deleteMany({ files_id: objectID });
-
-            if (deleteResult.deletedCount > 0) {
-                res.status(200).json({ 
-                    success: true, 
-                    message: 'File deleted successfully' 
-                });
+            if (userFile.b2Key) {
+                await deleteFromB2(userFile.b2Key);
             } else {
-                res.status(404).json({ error: 'File not found in storage' });
+                const deleteResult = await files_collection.deleteOne({ _id: objectID });
+                await chunks_collection.deleteMany({ files_id: objectID });
+                if (deleteResult.deletedCount === 0) {
+                    return res.status(404).json({ error: 'File not found in storage' });
+                }
             }
+
+            await allFiles.deleteOne({ fileId: objectID });
+            res.status(200).json({ success: true, message: 'File deleted successfully' });
 
         } catch (error) {
             console.error("Error deleting file:", error);
@@ -441,31 +513,28 @@ module.exports = (db, bucket) => {
 
     router.get('/api/storage', validateApiKey, async (req, res) => {
         try {
+            const storageLimit = 1073741824; 
             const userFiles = await allFiles.find({ userId: req.apiUser._id });
-            
+
             if (userFiles.length === 0) {
-                return res.status(200).json({
-                    success: true,
-                    used: 0,
-                    total: 1073741824, // 1GB
-                    fileCount: 0,
-                    usagePercentage: 0
-                });
+                return res.status(200).json({ success: true, used: 0, total: storageLimit, fileCount: 0, usagePercentage: 0 });
             }
 
-            const fileIds = userFiles.map(file => file.fileId);
-            const files = await files_collection.find({
-                _id: { $in: fileIds }
-            }).toArray();
-
-            const totalUsed = files.reduce((sum, file) => sum + (file.length || 0), 0);
-            const storageLimit = 1073741824; // 1GB
+            const b2Files = userFiles.filter(f => f.b2Key);
+            const gridFiles = userFiles.filter(f => !f.b2Key);
+            const b2Used = b2Files.reduce((sum, f) => sum + (f.sizeBytes || 0), 0);
+            let gridUsed = 0;
+            if (gridFiles.length > 0) {
+                const files = await files_collection.find({ _id: { $in: gridFiles.map(f => f.fileId) } }).toArray();
+                gridUsed = files.reduce((sum, f) => sum + (f.length || 0), 0);
+            }
+            const totalUsed = b2Used + gridUsed;
 
             res.status(200).json({
                 success: true,
                 used: totalUsed,
                 total: storageLimit,
-                fileCount: files.length,
+                fileCount: userFiles.length,
                 usagePercentage: (totalUsed / storageLimit) * 100
             });
 
@@ -478,7 +547,7 @@ module.exports = (db, bucket) => {
     return router;
 };
 
-// Helper functions
+
 function FormatFileSize(bytes){
     if (bytes >= 1024 * 1024) {
         return (bytes / (1024 * 1024)).toFixed(2) + ' MB';

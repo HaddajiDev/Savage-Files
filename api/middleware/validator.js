@@ -7,6 +7,7 @@ exports.registerRules = () =>
             max:15,
             min:3,
         }),
+        check('email', 'valid email is required').isEmail().normalizeEmail(),
         check('password', 'password is required').notEmpty(),
         check('password', 'password length 3 - 15').isLength({
             min:6,
@@ -23,7 +24,6 @@ exports.loginRules = () =>
             max:20
         }),
 ];
-
 
 
 exports.validation = (req, res, next) => {

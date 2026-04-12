@@ -176,66 +176,73 @@ function Developer() {
     upload: {
       method: "POST",
       path: "/api/upload",
-      description: "Upload a file to your storage",
+      description: "Upload a file to your storage. Optionally pass private=true to make the file private (default: false — public).",
       examples: {
         curl: `curl -X POST \\
     -H "Authorization: Bearer YOUR_API_KEY" \\
     -F "file=@/path/to/your/file.txt" \\
+    -F "private=true" \\
     ${process.env.REACT_APP_LINK_FILES}/api/upload`,
         python: `import requests
-  
-  url = "${process.env.REACT_APP_LINK_FILES}/api/upload"
-  headers = {"Authorization": "Bearer YOUR_API_KEY"}
-  files = {"file": open("/path/to/your/file.txt", "rb")}
-  
-  response = requests.post(url, headers=headers, files=files)
-  print(response.json())`,
+
+url = "${process.env.REACT_APP_LINK_FILES}/api/upload"
+headers = {"Authorization": "Bearer YOUR_API_KEY"}
+files = {"file": open("/path/to/your/file.txt", "rb")}
+data = {"private": "true"}  # omit or set "false" for public
+
+response = requests.post(url, headers=headers, files=files, data=data)
+print(response.json())`,
         javascript_fetch: `const formData = new FormData();
-  formData.append("file", fileInput.files[0]);
-  
-  fetch("${process.env.REACT_APP_LINK_FILES}/api/upload", {
-    method: "POST",
-    headers: {
-      "Authorization": "Bearer YOUR_API_KEY"
-    },
-    body: formData
-  })
+formData.append("file", fileInput.files[0]);
+formData.append("private", "true"); // omit or "false" for public
+
+fetch("${process.env.REACT_APP_LINK_FILES}/api/upload", {
+  method: "POST",
+  headers: {
+    "Authorization": "Bearer YOUR_API_KEY"
+  },
+  body: formData
+})
   .then(response => response.json())
   .then(data => console.log(data))
   .catch(error => console.error("Error:", error));`,
         javascript_axios: `import axios from 'axios';
-  
-  const formData = new FormData();
-  formData.append('file', fileInput.files[0]);
-  
-  axios.post("${process.env.REACT_APP_LINK_FILES}/api/upload", formData, {
-    headers: {
-      'Authorization': 'Bearer YOUR_API_KEY',
-      'Content-Type': 'multipart/form-data'
-    }
-  })
+
+const formData = new FormData();
+formData.append('file', fileInput.files[0]);
+formData.append('private', 'true'); // omit or 'false' for public
+
+axios.post("${process.env.REACT_APP_LINK_FILES}/api/upload", formData, {
+  headers: {
+    'Authorization': 'Bearer YOUR_API_KEY',
+    'Content-Type': 'multipart/form-data'
+  }
+})
   .then(response => console.log(response.data))
   .catch(error => console.error('Error:', error));`,
         typescript: `import axios from 'axios';
-  
-  const formData = new FormData();
-  formData.append('file', (document.getElementById('fileInput') as HTMLInputElement).files![0]);
-  
-  axios.post("${process.env.REACT_APP_LINK_FILES}/api/upload", formData, {
-    headers: {
-      'Authorization': 'Bearer YOUR_API_KEY',
-      'Content-Type': 'multipart/form-data'
-    }
-  })
+
+const formData = new FormData();
+formData.append('file', (document.getElementById('fileInput') as HTMLInputElement).files![0]);
+formData.append('private', 'true'); // omit or 'false' for public
+
+axios.post("${process.env.REACT_APP_LINK_FILES}/api/upload", formData, {
+  headers: {
+    'Authorization': 'Bearer YOUR_API_KEY',
+    'Content-Type': 'multipart/form-data'
+  }
+})
   .then(response => console.log(response.data))
   .catch(error => console.error('Error:', error));`
       },
       response: `{
-    "success": true,
-    "fileId": "507f1f77bcf86cd799439011",
-    "filename": "example.txt",
-    "size": "1.2 KB"
-  }`
+  "success": true,
+  "fileId": "507f1f77bcf86cd799439011",
+  "filename": "example.txt",
+  "size": "1.2 KB",
+  "isPublic": false,
+  "uploadDate": "2024-01-15T10:30:00.000Z"
+}`
     },
     list: {
       method: "GET",
@@ -280,18 +287,18 @@ function Developer() {
   .catch(error => console.error('Error:', error));`
       },
       response: `{
-    "success": true,
-    "files": [
-      {
-        "id": "507f1f77bcf86cd799439011",
-        "filename": "example.txt",
-        "size": "1.2 KB",
-        "uploadDate": "2024-01-15T10:30:00.000Z",
-        "contentType": "text/plain"
-      }
-    ],
-    "count": 1
-  }`
+  "success": true,
+  "files": [
+    {
+      "id": "507f1f77bcf86cd799439011",
+      "filename": "example.txt",
+      "size": "1.2 KB",
+      "uploadDate": "2024-01-15T10:30:00.000Z",
+      "isPublic": false
+    }
+  ],
+  "count": 1
+}`
     },
     download: {
       method: "GET",

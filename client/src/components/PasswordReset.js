@@ -16,7 +16,7 @@ function PasswordReset() {
   const dispatch = useDispatch()
   const error = useSelector((state) => state.user.error)
   
-  // Password validation states
+  
   const [passwordErrors, setPasswordErrors] = useState({
     length: false,
     uppercase: false,
@@ -38,7 +38,7 @@ function PasswordReset() {
     }
   }, [token])
 
-  // Validate password whenever newPassword changes
+  
   useEffect(() => {
     const errors = {
       length: newPassword.length >= 8,

@@ -1,4 +1,4 @@
-/* Global Reset & Base Styles */
+ 
 * {
   margin: 0;
   padding: 0;
@@ -12,14 +12,14 @@ body {
   line-height: 1.6;
 }
 
-/* Homepage Container */
+ 
 .homepage-container {
   display: flex;
   flex-direction: column;
   min-height: 100vh;
 }
 
-/* Navbar */
+ 
 .navbar {
   display: flex;
   align-items: center;
@@ -71,7 +71,7 @@ body {
   box-shadow: 0 4px 12px rgba(138, 43, 226, 0.3);
 }
 
-/* Hero Section */
+ 
 .hero {
   display: flex;
   flex-wrap: wrap;
@@ -184,7 +184,7 @@ body {
   box-shadow: 0 30px 60px rgba(138, 43, 226, 0.3);
 }
 
-/* Features Section */
+ 
 .features {
   padding: 5rem 2.5rem;
   background-color: #121218;
@@ -280,7 +280,7 @@ body {
   color: #b0b0c0;
 }
 
-/* Call to Action Section */
+ 
 .cta {
   padding: 6rem 2.5rem;
   background: linear-gradient(135deg, #1a1a2e 0%, #121218 50%, #0f0f1a 100%);
@@ -399,7 +399,7 @@ body {
   transform: scale(1.1);
 }
 
-/* Footer */
+ 
 .footer {
   margin-top: auto;
   padding: 2rem;
@@ -410,7 +410,7 @@ body {
   color: #6c757d;
 }
 
-/* Responsive Styles */
+ 
 @media (max-width: 992px) {
   .hero-text h1 {
     font-size: 2.8rem;
