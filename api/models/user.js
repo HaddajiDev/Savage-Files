@@ -8,7 +8,9 @@ const userSchema = new mongoose.Schema({
     verified: {type: Boolean, default: false},
     emailVerified: {type: Boolean, default: false},
     passwordChangedAt: {type: Date, default: null},
-    createdAt: {type: Date, default: Date.now}
+    createdAt: {type: Date, default: Date.now},
+    twoFactorSecret:  {type: String, default: null},
+    twoFactorEnabled: {type: Boolean, default: false}
 });
 
 module.exports = mongoose.model('User', userSchema);

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useDispatch, useSelector } from "react-redux"
-import { resetPassword, userLogin, userRegister } from "../redux/userSlice"
+import { resetPassword, userLogin, userRegister, verify2FALogin } from "../redux/userSlice"
 import { useNavigate } from "react-router-dom"
 
 function Auth() {
@@ -17,7 +17,9 @@ function Auth() {
 
   const dispatch = useDispatch()
   const navigate = useNavigate()
-  const { status, error } = useSelector((state) => state.user)
+  const { status, error, twoFactorPending, tempToken } = useSelector((state) => state.user)
+  const [otpCode, setOtpCode] = useState("")
+  const [otpError, setOtpError] = useState("")
 
   const [passwordErrors, setPasswordErrors] = useState({
     length: false, uppercase: false, lowercase: false, number: false, specialChar: false,
@@ -51,13 +53,24 @@ function Auth() {
     try {
       if (isLogin) {
         const result = await dispatch(userLogin(user)).unwrap()
-        if (result) navigate("/profile")
+        if (result && !result.requires2FA) navigate("/profile")
       } else {
         const result = await dispatch(userRegister(user)).unwrap()
         if (result) navigate("/profile")
       }
     } catch (err) {
       console.error("Authentication failed:", err)
+    }
+  }
+
+  const handleVerifyOTP = async () => {
+    if (otpCode.length !== 6) { setOtpError("Enter the 6-digit code."); return }
+    setOtpError("")
+    try {
+      await dispatch(verify2FALogin({ tempToken, token: otpCode })).unwrap()
+      navigate("/profile")
+    } catch (err) {
+      setOtpError(err?.error || "Invalid code — try again.")
     }
   }
 
@@ -98,6 +111,60 @@ function Auth() {
     setResetEmail("")
     setResetMessage("")
     setCountdown(0)
+  }
+
+  // 2FA verification screen shown after successful password check
+  if (twoFactorPending) {
+    return (
+      <>
+        <AuthStyles />
+        <div className="auth-page">
+          <BrandPanel />
+          <div className="auth-form-panel">
+            <div className="auth-card twofa-card">
+              <div className="twofa-auth-icon">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>
+              </div>
+              <h1 className="auth-title" style={{ textAlign: "center" }}>Two-Factor Auth</h1>
+              <p className="auth-subtitle" style={{ textAlign: "center" }}>
+                Open your authenticator app and enter the 6-digit code for <strong>Savage Files</strong>.
+              </p>
+
+              {otpError && (
+                <div className="auth-message error" style={{ marginBottom: "1rem" }}>{otpError}</div>
+              )}
+
+              <div className="auth-field">
+                <label className="auth-label">Authenticator code</label>
+                <input
+                  type="text"
+                  inputMode="numeric"
+                  placeholder="• • • • • •"
+                  maxLength={6}
+                  value={otpCode}
+                  onChange={(e) => setOtpCode(e.target.value.replace(/\D/g, ""))}
+                  onKeyDown={(e) => e.key === "Enter" && handleVerifyOTP()}
+                  className="auth-input auth-otp-input"
+                  autoFocus
+                />
+              </div>
+
+              <button
+                onClick={handleVerifyOTP}
+                disabled={otpCode.length !== 6 || status === "pending"}
+                className="auth-submit-btn"
+              >
+                {status === "pending" ? <span className="auth-spinner" /> : "Verify"}
+              </button>
+
+              <p className="twofa-lost-device">
+                Lost access to your device? Contact support.
+              </p>
+            </div>
+          </div>
+        </div>
+      </>
+    )
   }
 
   if (isResettingPassword) {
@@ -643,6 +710,72 @@ function AuthStyles() {
 
       @keyframes auth-spin {
         to { transform: rotate(360deg); }
+      }
+
+      /* ── 2FA auth screen ── */
+      .twofa-card {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+      }
+      .twofa-card .auth-field {
+        width: 100%;
+      }
+      .twofa-card .auth-submit-btn {
+        width: 100%;
+      }
+
+      .twofa-auth-icon {
+        width: 72px;
+        height: 72px;
+        border-radius: 20px;
+        background: linear-gradient(135deg, rgba(138,43,226,0.22) 0%, rgba(109,40,217,0.12) 100%);
+        border: 1px solid rgba(138,43,226,0.45);
+        color: #c084fc;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        margin: 0 auto 1.5rem;
+        box-shadow: 0 0 32px rgba(138,43,226,0.25), inset 0 1px 0 rgba(255,255,255,0.08);
+      }
+
+      .auth-otp-input {
+        letter-spacing: 0.5em;
+        text-align: center;
+        font-size: 2rem !important;
+        font-family: monospace;
+        font-weight: 700;
+        padding: 1rem !important;
+        color: #e9d5ff !important;
+        background: rgba(6, 4, 14, 0.85) !important;
+        border-color: rgba(138,43,226,0.35) !important;
+        caret-color: #a855f7;
+      }
+      .auth-otp-input:focus {
+        border-color: #7c3aed !important;
+        box-shadow: 0 0 0 3px rgba(124,58,237,0.2) !important;
+      }
+      .auth-otp-input::placeholder {
+        letter-spacing: 0.4em;
+        color: rgba(138,43,226,0.3) !important;
+        font-size: 1.5rem;
+      }
+
+      .auth-spinner {
+        display: inline-block;
+        width: 18px;
+        height: 18px;
+        border: 2px solid rgba(255,255,255,0.25);
+        border-top-color: #fff;
+        border-radius: 50%;
+        animation: spin 0.75s linear infinite;
+      }
+
+      .twofa-lost-device {
+        margin-top: 1.25rem;
+        font-size: 0.78rem;
+        color: #4a4a6a;
+        text-align: center;
       }
 
       @media (max-width: 768px) {
