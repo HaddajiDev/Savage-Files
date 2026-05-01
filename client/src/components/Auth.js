@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from "react"
 import { useDispatch, useSelector } from "react-redux"
-import { resetPassword, userLogin, userRegister } from "../redux/userSlice"
+import { resetPassword, userLogin, userRegister, verifyTwoFactorLogin } from "../redux/userSlice"
 import { useNavigate } from "react-router-dom"
 
 function Auth() {
@@ -14,6 +14,8 @@ function Auth() {
   const [countdown, setCountdown] = useState(0)
   const [resetMessage, setResetMessage] = useState("")
   const [resetMessageType, setResetMessageType] = useState("")
+  const [twoFactorTempToken, setTwoFactorTempToken] = useState("")
+  const [twoFactorCode, setTwoFactorCode] = useState("")
 
   const dispatch = useDispatch()
   const navigate = useNavigate()
@@ -51,6 +53,11 @@ function Auth() {
     try {
       if (isLogin) {
         const result = await dispatch(userLogin(user)).unwrap()
+        if (result?.twoFactorRequired) {
+          setTwoFactorTempToken(result.tempToken)
+          setTwoFactorCode("")
+          return
+        }
         if (result) navigate("/profile")
       } else {
         const result = await dispatch(userRegister(user)).unwrap()
@@ -65,11 +72,30 @@ function Auth() {
     if (e.key === "Enter") handleAuth()
   }
 
+  const handleTwoFactorVerify = async () => {
+    if (!twoFactorCode.trim()) return
+    try {
+      const result = await dispatch(verifyTwoFactorLogin({
+        tempToken: twoFactorTempToken,
+        token: twoFactorCode,
+      })).unwrap()
+      if (result) navigate("/profile")
+    } catch (err) {
+      console.error("Two-factor verification failed:", err)
+    }
+  }
+
+  const handleTwoFactorKeyDown = (e) => {
+    if (e.key === "Enter") handleTwoFactorVerify()
+  }
+
   const handleSwitchMode = (check) => {
     setIsLogin(check)
     setUser({ username: "", password: "", email: "" })
     setShowPasswordRequirements(false)
     setIsResettingPassword(false)
+    setTwoFactorTempToken("")
+    setTwoFactorCode("")
   }
 
   const handleSendResetEmail = async () => {
@@ -91,6 +117,56 @@ function Auth() {
     } finally {
       setIsLoading(false)
     }
+  }
+
+  if (twoFactorTempToken) {
+    return (
+      <div className="auth-page">
+        <BrandPanel />
+        <div className="auth-form-panel">
+          <div className="auth-card">
+            <button
+              className="auth-back-btn"
+              onClick={() => {
+                setTwoFactorTempToken("")
+                setTwoFactorCode("")
+              }}
+            >
+              <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="15 18 9 12 15 6"/></svg>
+              Back to Login
+            </button>
+            <h1 className="auth-title">Two-factor code</h1>
+            <p className="auth-subtitle">Enter the 6-digit code from your authenticator app.</p>
+
+            <div className="auth-field">
+              <label className="auth-label">Authentication code</label>
+              <input
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                placeholder="123456"
+                value={twoFactorCode}
+                onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
+                onKeyDown={handleTwoFactorKeyDown}
+                className="auth-input auth-code-input"
+                autoFocus
+              />
+            </div>
+
+            {status === "failed" && <p className="auth-error">{error}</p>}
+
+            <button
+              className="auth-submit-btn"
+              onClick={handleTwoFactorVerify}
+              disabled={status === "pending" || twoFactorCode.length < 6}
+            >
+              {status === "pending" ? <Spinner /> : "Verify"}
+            </button>
+          </div>
+        </div>
+        <AuthStyles />
+      </div>
+    )
   }
 
   const handleBackToAuth = () => {
@@ -482,6 +558,13 @@ function AuthStyles() {
         outline: none;
         border-color: #7c3aed;
         box-shadow: 0 0 0 3px rgba(124, 58, 237, 0.15);
+      }
+
+      .auth-code-input {
+        text-align: center;
+        letter-spacing: 0.25rem;
+        font-size: 1.35rem;
+        font-weight: 700;
       }
 
       .auth-input.input-error {

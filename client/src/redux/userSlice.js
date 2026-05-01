@@ -37,6 +37,15 @@ export const userLogin = createAsyncThunk("user/login", async (user, { rejectWit
   }
 })
 
+export const verifyTwoFactorLogin = createAsyncThunk("user/login2fa", async ({ tempToken, token }, { rejectWithValue }) => {
+  try {
+    const result = await axios.post(link + "/login/2fa", { tempToken, token })
+    return result.data
+  } catch (error) {
+    return rejectWithValue(error.response?.data || "Failed to verify two-factor code")
+  }
+})
+
 export const currentUser = createAsyncThunk("user/current", async (_, { rejectWithValue }) => {
   try {
     const result = await axios.get(link + "/current", {
@@ -284,6 +293,66 @@ export const verifyNewEmail = createAsyncThunk(
   }
 )
 
+export const setupTwoFactor = createAsyncThunk(
+  "user/setupTwoFactor",
+  async (_, { rejectWithValue }) => {
+    try {
+      const result = await axios.post(
+        link + "/2fa/setup",
+        null,
+        {
+          headers: {
+            Authorization: getCookie("token"),
+          },
+        }
+      )
+      return result.data
+    } catch (error) {
+      return rejectWithValue(error.response?.data || "Failed to start two-factor setup")
+    }
+  }
+)
+
+export const verifyTwoFactorSetup = createAsyncThunk(
+  "user/verifyTwoFactorSetup",
+  async (token, { rejectWithValue }) => {
+    try {
+      const result = await axios.post(
+        link + "/2fa/verify",
+        { token },
+        {
+          headers: {
+            Authorization: getCookie("token"),
+          },
+        }
+      )
+      return result.data
+    } catch (error) {
+      return rejectWithValue(error.response?.data || "Failed to verify two-factor setup")
+    }
+  }
+)
+
+export const disableTwoFactor = createAsyncThunk(
+  "user/disableTwoFactor",
+  async ({ password, token }, { rejectWithValue }) => {
+    try {
+      const result = await axios.post(
+        link + "/2fa/disable",
+        { password, token },
+        {
+          headers: {
+            Authorization: getCookie("token"),
+          },
+        }
+      )
+      return result.data
+    } catch (error) {
+      return rejectWithValue(error.response?.data || "Failed to disable two-factor authentication")
+    }
+  }
+)
+
 const initialState = {
   user: null,
   files: null,
@@ -351,13 +420,32 @@ export const userSlice = createSlice({
       })
       .addCase(userLogin.fulfilled, (state, action) => {
         state.status = "succeeded"
-        state.user = action.payload.user
+        state.user = action.payload.user || null
         state.loading = false
-        setCookie("token", action.payload.token, 7)
+        if (action.payload.token) {
+          setCookie("token", action.payload.token, 7)
+        }
       })
       .addCase(userLogin.rejected, (state, action) => {
         state.status = "failed"
         state.error = action.payload?.error || "Login failed"
+        state.loading = false
+      })
+
+      .addCase(verifyTwoFactorLogin.pending, (state) => {
+        state.status = "pending"
+        state.error = ""
+        state.loading = true
+      })
+      .addCase(verifyTwoFactorLogin.fulfilled, (state, action) => {
+        state.status = "succeeded"
+        state.user = action.payload.user
+        state.loading = false
+        setCookie("token", action.payload.token, 7)
+      })
+      .addCase(verifyTwoFactorLogin.rejected, (state, action) => {
+        state.status = "failed"
+        state.error = action.payload?.error || "Invalid verification code"
         state.loading = false
       })
 
@@ -562,6 +650,53 @@ export const userSlice = createSlice({
       .addCase(verifyNewEmail.rejected, (state, action) => {
         state.status = "failed"
         state.error = action.payload?.error || "Failed to verify new email"
+        state.loading = false
+      })
+
+      .addCase(setupTwoFactor.pending, (state) => {
+        state.status = "pending"
+        state.error = ""
+        state.loading = true
+      })
+      .addCase(setupTwoFactor.fulfilled, (state) => {
+        state.status = "succeeded"
+        state.loading = false
+      })
+      .addCase(setupTwoFactor.rejected, (state, action) => {
+        state.status = "failed"
+        state.error = action.payload?.error || "Failed to start two-factor setup"
+        state.loading = false
+      })
+
+      .addCase(verifyTwoFactorSetup.pending, (state) => {
+        state.status = "pending"
+        state.error = ""
+        state.loading = true
+      })
+      .addCase(verifyTwoFactorSetup.fulfilled, (state, action) => {
+        state.status = "succeeded"
+        state.user = action.payload.user
+        state.loading = false
+      })
+      .addCase(verifyTwoFactorSetup.rejected, (state, action) => {
+        state.status = "failed"
+        state.error = action.payload?.error || "Failed to verify two-factor setup"
+        state.loading = false
+      })
+
+      .addCase(disableTwoFactor.pending, (state) => {
+        state.status = "pending"
+        state.error = ""
+        state.loading = true
+      })
+      .addCase(disableTwoFactor.fulfilled, (state, action) => {
+        state.status = "succeeded"
+        state.user = action.payload.user
+        state.loading = false
+      })
+      .addCase(disableTwoFactor.rejected, (state, action) => {
+        state.status = "failed"
+        state.error = action.payload?.error || "Failed to disable two-factor authentication"
         state.loading = false
       })
 
