@@ -17,6 +17,8 @@ const corsOptions = {
 };
 
 app.use(cors(corsOptions));
+// Explicitly respond to ALL preflight requests before any rate-limiter runs
+app.options('*', cors(corsOptions));
 
 app.set('trust proxy', 1);
 app.use(express.json());
