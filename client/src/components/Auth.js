@@ -1,5 +1,6 @@
 "use client"
 
+// type shit
 import { useState, useEffect } from "react"
 import { useDispatch, useSelector } from "react-redux"
 import { resetPassword, userLogin, userRegister } from "../redux/userSlice"
