@@ -1,13 +1,7 @@
 "use client"
 import { useState, useEffect } from "react"
 import { useSelector, useDispatch } from "react-redux"
-import {
-  disableTwoFactor,
-  sendVerifyNewEmail,
-  setupTwoFactor,
-  updatePassword,
-  verifyTwoFactorSetup,
-} from "../redux/userSlice"
+import { sendVerifyNewEmail, updatePassword } from "../redux/userSlice"
 
 function SettingsModal({ isOpen, onClose }) {
   const user = useSelector((state) => state.user.user)
@@ -23,10 +17,6 @@ function SettingsModal({ isOpen, onClose }) {
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState("")
   const [messageType, setMessageType] = useState("") // "success" or "error"
-  const [twoFactorSetup, setTwoFactorSetup] = useState(null)
-  const [twoFactorCode, setTwoFactorCode] = useState("")
-  const [disableTwoFactorPassword, setDisableTwoFactorPassword] = useState("")
-  const [disableTwoFactorCode, setDisableTwoFactorCode] = useState("")
   
   // Password validation states
   const [passwordErrors, setPasswordErrors] = useState({
@@ -39,7 +29,6 @@ function SettingsModal({ isOpen, onClose }) {
   const [isPasswordValid, setIsPasswordValid] = useState(false)
 
   const hasEmail = user?.email
-  const twoFactorEnabled = Boolean(user?.twoFactorEnabled)
 
   // Validate password whenever newPassword changes
   useEffect(() => {
@@ -141,72 +130,6 @@ function SettingsModal({ isOpen, onClose }) {
       setConfirmPassword("")
     } catch (e) {
       setMessage(error || "Failed to change password. Please try again.")
-      setMessageType("error")
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const handleStartTwoFactorSetup = async () => {
-    setIsLoading(true)
-    setMessage("")
-    try {
-      const result = await dispatch(setupTwoFactor()).unwrap()
-      setTwoFactorSetup(result)
-      setTwoFactorCode("")
-      setMessage("Scan the QR code, then enter the code from your authenticator app.")
-      setMessageType("success")
-    } catch (e) {
-      setMessage(e?.error || "Failed to start two-factor setup")
-      setMessageType("error")
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const handleVerifyTwoFactorSetup = async () => {
-    if (twoFactorCode.length < 6) {
-      setMessage("Enter the 6-digit code from your authenticator app")
-      setMessageType("error")
-      return
-    }
-
-    setIsLoading(true)
-    setMessage("")
-    try {
-      await dispatch(verifyTwoFactorSetup(twoFactorCode)).unwrap()
-      setTwoFactorSetup(null)
-      setTwoFactorCode("")
-      setMessage("Two-factor authentication is now enabled.")
-      setMessageType("success")
-    } catch (e) {
-      setMessage(e?.error || "Invalid verification code")
-      setMessageType("error")
-    } finally {
-      setIsLoading(false)
-    }
-  }
-
-  const handleDisableTwoFactor = async () => {
-    if (!disableTwoFactorPassword || disableTwoFactorCode.length < 6) {
-      setMessage("Enter your password and current 2FA code")
-      setMessageType("error")
-      return
-    }
-
-    setIsLoading(true)
-    setMessage("")
-    try {
-      await dispatch(disableTwoFactor({
-        password: disableTwoFactorPassword,
-        token: disableTwoFactorCode,
-      })).unwrap()
-      setDisableTwoFactorPassword("")
-      setDisableTwoFactorCode("")
-      setMessage("Two-factor authentication has been disabled.")
-      setMessageType("success")
-    } catch (e) {
-      setMessage(e?.error || "Failed to disable two-factor authentication")
       setMessageType("error")
     } finally {
       setIsLoading(false)
@@ -420,85 +343,6 @@ function SettingsModal({ isOpen, onClose }) {
                 )}
               </button>
             </div>
-          </div>
-
-          <div className="setting-section">
-            <h3 className="setting-title">Two-Factor Authentication</h3>
-
-            {!twoFactorEnabled ? (
-              <div className="two-factor-section">
-                <p className="text-secondary mb-4">
-                  Add an authenticator app code to your login flow.
-                </p>
-
-                {!twoFactorSetup ? (
-                  <button
-                    onClick={handleStartTwoFactorSetup}
-                    disabled={isLoading}
-                    className="verify-button"
-                  >
-                    {isLoading ? <div className="spinner-small"></div> : "Enable 2FA"}
-                  </button>
-                ) : (
-                  <div className="two-factor-setup">
-                    <div className="qr-wrap">
-                      <img src={twoFactorSetup.qrCode} alt="Two-factor setup QR code" className="qr-code" />
-                    </div>
-                    <p className="two-factor-secret">
-                      Manual key: <span>{twoFactorSetup.secret}</span>
-                    </p>
-                    <div className="input-group">
-                      <input
-                        type="text"
-                        inputMode="numeric"
-                        placeholder="123456"
-                        value={twoFactorCode}
-                        onChange={(e) => setTwoFactorCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                        className="settings-input code-input"
-                        disabled={isLoading}
-                      />
-                      <button
-                        onClick={handleVerifyTwoFactorSetup}
-                        disabled={isLoading || twoFactorCode.length < 6}
-                        className="change-email-button"
-                      >
-                        {isLoading ? <div className="spinner-small"></div> : "Verify"}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </div>
-            ) : (
-              <div className="two-factor-section">
-                <p className="text-success text-sm">Two-factor authentication is enabled.</p>
-                <div className="password-fields space-y-4 two-factor-disable">
-                  <input
-                    type="password"
-                    placeholder="Current Password"
-                    value={disableTwoFactorPassword}
-                    onChange={(e) => setDisableTwoFactorPassword(e.target.value)}
-                    className="settings-input"
-                    disabled={isLoading}
-                  />
-                  <input
-                    type="text"
-                    inputMode="numeric"
-                    placeholder="Current 2FA code"
-                    value={disableTwoFactorCode}
-                    onChange={(e) => setDisableTwoFactorCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
-                    className="settings-input code-input"
-                    disabled={isLoading}
-                  />
-                </div>
-                <button
-                  onClick={handleDisableTwoFactor}
-                  disabled={isLoading || !disableTwoFactorPassword || disableTwoFactorCode.length < 6}
-                  className="danger-action-button"
-                >
-                  {isLoading ? <div className="spinner-small"></div> : "Disable 2FA"}
-                </button>
-              </div>
-            )}
           </div>
         </div>
 
@@ -715,83 +559,6 @@ function SettingsModal({ isOpen, onClose }) {
           display: flex;
           align-items: center;
           justify-content: center;
-        }
-
-        .danger-action-button {
-          background: rgba(239, 68, 68, 0.14);
-          border: 1px solid rgba(239, 68, 68, 0.45);
-          border-radius: 0.75rem;
-          color: #fca5a5;
-          cursor: pointer;
-          font-size: 0.875rem;
-          font-weight: 600;
-          padding: 0.75rem 1.5rem;
-          transition: var(--transition);
-          min-width: 120px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          margin-top: 1rem;
-        }
-
-        .danger-action-button:hover:not(:disabled) {
-          background: rgba(239, 68, 68, 0.22);
-          color: #fecaca;
-        }
-
-        .danger-action-button:disabled {
-          opacity: 0.6;
-          cursor: not-allowed;
-        }
-
-        .two-factor-section {
-          display: flex;
-          flex-direction: column;
-          align-items: flex-start;
-          gap: 1rem;
-        }
-
-        .two-factor-setup {
-          width: 100%;
-          display: flex;
-          flex-direction: column;
-          gap: 1rem;
-        }
-
-        .qr-wrap {
-          width: 180px;
-          height: 180px;
-          padding: 0.75rem;
-          background: #fff;
-          border-radius: 0.75rem;
-        }
-
-        .qr-code {
-          width: 100%;
-          height: 100%;
-          display: block;
-        }
-
-        .two-factor-secret {
-          color: var(--text-secondary);
-          font-size: 0.8rem;
-          margin: 0;
-          overflow-wrap: anywhere;
-        }
-
-        .two-factor-secret span {
-          color: var(--text-primary);
-          font-family: monospace;
-        }
-
-        .code-input {
-          text-align: center;
-          letter-spacing: 0.2rem;
-          font-weight: 700;
-        }
-
-        .two-factor-disable {
-          width: 100%;
         }
 
         .verify-button:hover:not(:disabled),

@@ -5,41 +5,12 @@ const crypto = require('crypto');
 const router = express.Router();
 const bcrypt = require('bcrypt');
 var jwt = require('jsonwebtoken');
-const QRCode = require('qrcode');
-const { generateSecret, generateURI, verify } = require('otplib');
 
 const {loginRules, registerRules, validation} = require('../middleware/validator');
 const isAuth = require('../middleware/passport');
 const { send } = require('process');
 const pending = require('../models/pending');
 const { sendVerificationEmail, sendPasswordResetEmail, sendConformationNewEmail } = require('../lib/sendEmail');
-
-function createLoginToken(user) {
-    const payload = {
-        username: user.username
-    }
-    const token = jwt.sign(payload, process.env.SCTY_KEY, {
-        expiresIn: '7d'
-    });
-
-    return `bearer ${token}`;
-}
-
-function createTwoFactorLoginToken(user) {
-    return jwt.sign(
-        { userId: user._id, purpose: '2fa-login' },
-        process.env.SCTY_KEY,
-        { expiresIn: '5m' }
-    );
-}
-
-function sanitizeUser(user) {
-    const sanitized = user.toObject ? user.toObject() : { ...user };
-    delete sanitized.password;
-    delete sanitized.twoFactorSecret;
-    delete sanitized.twoFactorTempSecret;
-    return sanitized;
-}
 
 router.post("/register", registerRules(), validation, async (request, result) => {
     try {
@@ -65,7 +36,14 @@ router.post("/register", registerRules(), validation, async (request, result) =>
 
         let res = await newUser.save();
 
-        result.status(200).send({ user: sanitizeUser(res), msg: "user added", token: createLoginToken(res) });
+		const payload = {
+			username: res.username
+		}
+		const token = await jwt.sign(payload, process.env.SCTY_KEY, {
+			expiresIn: '7d'
+		});
+        
+        result.status(200).send({ user: res, msg: "user added", token: `bearer ${token}` });
    
     } catch (error) {
         console.error(error);
@@ -95,18 +73,16 @@ router.post('/login', loginRules(), validation, async (request, result) => {
             return;
         }       
 
-        if (searchedUser.twoFactorEnabled) {
-            return result.status(200).send({
-                twoFactorRequired: true,
-                tempToken: createTwoFactorLoginToken(searchedUser),
-                msg: 'Two-factor authentication required'
-            });
+        const payload = {
+            username: searchedUser.username
         }
-
+        const token = await jwt.sign(payload, process.env.SCTY_KEY, {
+            expiresIn: '7d'
+        });        
         result.status(200).send({ 
-            user: sanitizeUser(searchedUser), 
+            user: searchedUser, 
             msg: 'User logged in successfully', 
-            token: createLoginToken(searchedUser) 
+            token: `bearer ${token}` 
         });
     } catch (error) {
         console.error("Error during login:", error);
@@ -114,151 +90,9 @@ router.post('/login', loginRules(), validation, async (request, result) => {
     }
 });
 
-router.post('/login/2fa', async (req, res) => {
-    try {
-        const { tempToken, token } = req.body;
-        if (!tempToken || !token) {
-            return res.status(400).send({ error: 'Verification code is required' });
-        }
-
-        const decoded = jwt.verify(tempToken, process.env.SCTY_KEY);
-        if (decoded.purpose !== '2fa-login') {
-            return res.status(400).send({ error: 'Invalid login verification token' });
-        }
-
-        const user = await User.findById(decoded.userId).select('+twoFactorSecret');
-        if (!user || !user.twoFactorEnabled || !user.twoFactorSecret) {
-            return res.status(400).send({ error: 'Two-factor authentication is not enabled' });
-        }
-
-        const verification = await verify({
-            token: String(token).trim(),
-            secret: user.twoFactorSecret
-        });
-
-        if (!verification.valid) {
-            return res.status(400).send({ error: 'Invalid verification code' });
-        }
-
-        res.status(200).send({
-            user: sanitizeUser(user),
-            msg: 'User logged in successfully',
-            token: createLoginToken(user)
-        });
-    } catch (error) {
-        console.error('Two-factor login error:', error);
-        res.status(400).send({ error: 'Invalid or expired verification session' });
-    }
-});
-
 
 router.get('/current', isAuth(), (request, result) => {    
     result.status(200).send({user: request.user});
-});
-
-router.post('/2fa/setup', isAuth(), async (req, res) => {
-    try {
-        const secret = generateSecret();
-        const issuer = process.env.TWO_FACTOR_ISSUER || 'Savage Files';
-        const otpauthUrl = generateURI({
-            issuer,
-            label: req.user.email || req.user.username,
-            secret
-        });
-        const qrCode = await QRCode.toDataURL(otpauthUrl);
-
-        await User.findByIdAndUpdate(req.user._id, { twoFactorTempSecret: secret });
-
-        res.status(200).send({
-            secret,
-            otpauthUrl,
-            qrCode
-        });
-    } catch (error) {
-        console.error('Two-factor setup error:', error);
-        res.status(500).send({ error: 'Failed to start two-factor setup' });
-    }
-});
-
-router.post('/2fa/verify', isAuth(), async (req, res) => {
-    try {
-        const { token } = req.body;
-        if (!token) {
-            return res.status(400).send({ error: 'Verification code is required' });
-        }
-
-        const user = await User.findById(req.user._id).select('+twoFactorTempSecret');
-        if (!user || !user.twoFactorTempSecret) {
-            return res.status(400).send({ error: 'Start two-factor setup first' });
-        }
-
-        const verification = await verify({
-            token: String(token).trim(),
-            secret: user.twoFactorTempSecret
-        });
-
-        if (!verification.valid) {
-            return res.status(400).send({ error: 'Invalid verification code' });
-        }
-
-        user.twoFactorSecret = user.twoFactorTempSecret;
-        user.twoFactorTempSecret = null;
-        user.twoFactorEnabled = true;
-        await user.save();
-
-        res.status(200).send({
-            message: 'Two-factor authentication enabled',
-            user: sanitizeUser(user)
-        });
-    } catch (error) {
-        console.error('Two-factor verification error:', error);
-        res.status(500).send({ error: 'Failed to enable two-factor authentication' });
-    }
-});
-
-router.post('/2fa/disable', isAuth(), async (req, res) => {
-    try {
-        const { password, token } = req.body;
-        if (!password || !token) {
-            return res.status(400).send({ error: 'Password and verification code are required' });
-        }
-
-        const user = await User.findById(req.user._id).select('+twoFactorSecret');
-        if (!user) {
-            return res.status(404).send({ error: 'User not found' });
-        }
-
-        const passwordMatches = await bcrypt.compare(password, user.password);
-        if (!passwordMatches) {
-            return res.status(400).send({ error: 'Password is incorrect' });
-        }
-
-        if (!user.twoFactorEnabled || !user.twoFactorSecret) {
-            return res.status(400).send({ error: 'Two-factor authentication is not enabled' });
-        }
-
-        const verification = await verify({
-            token: String(token).trim(),
-            secret: user.twoFactorSecret
-        });
-
-        if (!verification.valid) {
-            return res.status(400).send({ error: 'Invalid verification code' });
-        }
-
-        user.twoFactorEnabled = false;
-        user.twoFactorSecret = null;
-        user.twoFactorTempSecret = null;
-        await user.save();
-
-        res.status(200).send({
-            message: 'Two-factor authentication disabled',
-            user: sanitizeUser(user)
-        });
-    } catch (error) {
-        console.error('Two-factor disable error:', error);
-        res.status(500).send({ error: 'Failed to disable two-factor authentication' });
-    }
 });
 
 
@@ -307,7 +141,14 @@ router.post('/send/add-email', async (req, res) => {
         });
         await pendingUser.save();
 
-        res.status(200).send({ user: sanitizeUser(result), msg: "user added", token: createLoginToken(result) });
+        const payloadLogin = {
+			username: username
+		}
+		const tokenLogin = await jwt.sign(payloadLogin, process.env.SCTY_KEY, {
+			expiresIn: '7d'
+		});
+
+        res.status(200).send({ user: result, msg: "user added", token: `bearer ${tokenLogin}` });
 
     } catch (error) {
         console.error('Error:', error);
