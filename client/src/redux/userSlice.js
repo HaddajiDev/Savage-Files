@@ -10,7 +10,7 @@ export const userRegister = createAsyncThunk("user/signUp", async (user, { rejec
     console.log("Registration result:", result)
     return result.data
   } catch (error) {
-    return rejectWithValue(error.response?.data || { error: "Network error — check your connection." })
+    return rejectWithValue(error.response.data)
   }
 })
 
@@ -33,7 +33,7 @@ export const userLogin = createAsyncThunk("user/login", async (user, { rejectWit
     const result = await axios.post(link + "/login", user)
     return result.data
   } catch (error) {
-    return rejectWithValue(error.response?.data || { error: "Network error — check your connection." })
+    return rejectWithValue(error.response.data)
   }
 })
 
