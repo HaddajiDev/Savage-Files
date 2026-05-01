@@ -1,7 +1,7 @@
 "use client"
 import { useState, useEffect } from "react"
 import { useSelector, useDispatch } from "react-redux"
-import { sendVerifyNewEmail, updatePassword, setup2FA, enable2FA, disable2FA } from "../redux/userSlice"
+import { sendVerifyNewEmail, updatePassword } from "../redux/userSlice"
 
 function SettingsModal({ isOpen, onClose }) {
   const user = useSelector((state) => state.user.user)
@@ -17,16 +17,6 @@ function SettingsModal({ isOpen, onClose }) {
   const [isLoading, setIsLoading] = useState(false)
   const [message, setMessage] = useState("")
   const [messageType, setMessageType] = useState("") // "success" or "error"
-
-  // 2FA state
-  const [twoFAStep, setTwoFAStep] = useState("idle") // idle | password | qr | disabling
-  const [twoFAPassword, setTwoFAPassword] = useState("")
-  const [twoFACode, setTwoFACode] = useState("")
-  const [twoFADisablePassword, setTwoFADisablePassword] = useState("")
-  const [twoFADisableCode, setTwoFADisableCode] = useState("")
-  const [qrDataUrl, setQrDataUrl] = useState("")
-  const [manualKey, setManualKey] = useState("")
-  const [twoFAMsg, setTwoFAMsg] = useState({ text: "", type: "" })
   
   // Password validation states
   const [passwordErrors, setPasswordErrors] = useState({
@@ -146,45 +136,6 @@ function SettingsModal({ isOpen, onClose }) {
     }
   }
 
-  const handle2FASetup = async () => {
-    if (!twoFAPassword) return setTwoFAMsg({ text: "Enter your password first.", type: "error" })
-    setIsLoading(true); setTwoFAMsg({ text: "", type: "" })
-    try {
-      const res = await dispatch(setup2FA(twoFAPassword)).unwrap()
-      setQrDataUrl(res.qrDataUrl)
-      setManualKey(res.secret)
-      setTwoFAStep("qr")
-      setTwoFAPassword("")
-    } catch (e) {
-      setTwoFAMsg({ text: e?.error || "Incorrect password.", type: "error" })
-    } finally { setIsLoading(false) }
-  }
-
-  const handle2FAEnable = async () => {
-    if (twoFACode.length !== 6) return setTwoFAMsg({ text: "Enter the 6-digit code.", type: "error" })
-    setIsLoading(true); setTwoFAMsg({ text: "", type: "" })
-    try {
-      await dispatch(enable2FA(twoFACode)).unwrap()
-      setTwoFAStep("idle"); setTwoFACode(""); setQrDataUrl(""); setManualKey("")
-      setTwoFAMsg({ text: "2FA enabled! Your account is now protected.", type: "success" })
-    } catch (e) {
-      setTwoFAMsg({ text: e?.error || "Invalid code, try again.", type: "error" })
-    } finally { setIsLoading(false) }
-  }
-
-  const handle2FADisable = async () => {
-    if (!twoFADisablePassword || twoFADisableCode.length !== 6)
-      return setTwoFAMsg({ text: "Enter your password and the 6-digit code.", type: "error" })
-    setIsLoading(true); setTwoFAMsg({ text: "", type: "" })
-    try {
-      await dispatch(disable2FA({ password: twoFADisablePassword, token: twoFADisableCode })).unwrap()
-      setTwoFAStep("idle"); setTwoFADisablePassword(""); setTwoFADisableCode("")
-      setTwoFAMsg({ text: "2FA has been disabled.", type: "success" })
-    } catch (e) {
-      setTwoFAMsg({ text: e?.error || "Could not disable 2FA.", type: "error" })
-    } finally { setIsLoading(false) }
-  }
-
   if (!isOpen) return null
 
   return (
@@ -300,136 +251,6 @@ function SettingsModal({ isOpen, onClose }) {
                     </div>
                   </div>
                 )}
-              </div>
-            )}
-          </div>
-
-          {/* 2FA Section */}
-          <div className="setting-section">
-            <h3 className="setting-title">Two-Factor Authentication</h3>
-
-            {twoFAMsg.text && (
-              <div className={`message ${twoFAMsg.type}`} style={{ marginBottom: "1rem" }}>
-                {twoFAMsg.text}
-              </div>
-            )}
-
-            {/* Status row */}
-            {twoFAStep === "idle" && (
-              <div className="twofa-status-row">
-                <div className="twofa-status-info">
-                  <div className={`twofa-badge ${user?.twoFactorEnabled ? "enabled" : "disabled"}`}>
-                    {user?.twoFactorEnabled ? (
-                      <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg> Enabled</>
-                    ) : (
-                      <><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg> Disabled</>
-                    )}
-                  </div>
-                  <p className="twofa-desc">
-                    {user?.twoFactorEnabled
-                      ? "Your account is protected with an authenticator app."
-                      : "Add an extra layer of security using Google Authenticator or Authy."}
-                  </p>
-                </div>
-                <button
-                  className={user?.twoFactorEnabled ? "twofa-btn-danger" : "twofa-btn-enable"}
-                  onClick={() => { setTwoFAMsg({ text: "", type: "" }); setTwoFAStep(user?.twoFactorEnabled ? "disabling" : "password") }}
-                >
-                  {user?.twoFactorEnabled ? "Disable 2FA" : "Enable 2FA"}
-                </button>
-              </div>
-            )}
-
-            {/* Step 1 — enter password to generate QR */}
-            {twoFAStep === "password" && (
-              <div className="twofa-step">
-                <p className="twofa-step-title">Step 1 — Confirm your password</p>
-                <p className="twofa-step-desc">We need to verify it's you before generating a QR code.</p>
-                <input
-                  type="password"
-                  className="settings-input"
-                  placeholder="Current password"
-                  value={twoFAPassword}
-                  onChange={e => setTwoFAPassword(e.target.value)}
-                  onKeyDown={e => e.key === "Enter" && handle2FASetup()}
-                  disabled={isLoading}
-                  style={{ marginBottom: "0.75rem" }}
-                />
-                <div className="twofa-actions">
-                  <button className="verify-button" onClick={handle2FASetup} disabled={isLoading || !twoFAPassword}>
-                    {isLoading ? <div className="spinner-small" /> : "Continue"}
-                  </button>
-                  <button className="cancel-button" onClick={() => setTwoFAStep("idle")}>Cancel</button>
-                </div>
-              </div>
-            )}
-
-            {/* Step 2 — show QR, enter code to confirm */}
-            {twoFAStep === "qr" && (
-              <div className="twofa-step">
-                <p className="twofa-step-title">Step 2 — Scan with your authenticator app</p>
-                <p className="twofa-step-desc">Open Google Authenticator, Authy, or any TOTP app and scan the QR code.</p>
-                {qrDataUrl && (
-                  <div className="twofa-qr-wrap">
-                    <img src={qrDataUrl} alt="2FA QR Code" className="twofa-qr" />
-                  </div>
-                )}
-                <details className="twofa-manual">
-                  <summary>Can't scan? Enter code manually</summary>
-                  <code className="twofa-secret">{manualKey}</code>
-                </details>
-                <p className="twofa-step-title" style={{ marginTop: "1.25rem" }}>Step 3 — Enter the 6-digit code</p>
-                <input
-                  type="text"
-                  className="settings-input twofa-otp-input"
-                  placeholder="000000"
-                  maxLength={6}
-                  value={twoFACode}
-                  onChange={e => setTwoFACode(e.target.value.replace(/\D/g, ""))}
-                  onKeyDown={e => e.key === "Enter" && handle2FAEnable()}
-                  disabled={isLoading}
-                  style={{ marginBottom: "0.75rem", letterSpacing: "0.3em", textAlign: "center", fontSize: "1.4rem" }}
-                />
-                <div className="twofa-actions">
-                  <button className="verify-button" onClick={handle2FAEnable} disabled={isLoading || twoFACode.length !== 6}>
-                    {isLoading ? <div className="spinner-small" /> : "Verify & Enable"}
-                  </button>
-                  <button className="cancel-button" onClick={() => { setTwoFAStep("idle"); setTwoFACode(""); setQrDataUrl("") }}>Cancel</button>
-                </div>
-              </div>
-            )}
-
-            {/* Disable flow */}
-            {twoFAStep === "disabling" && (
-              <div className="twofa-step">
-                <p className="twofa-step-title">Disable 2FA</p>
-                <p className="twofa-step-desc">Enter your password and the current code from your authenticator app.</p>
-                <input
-                  type="password"
-                  className="settings-input"
-                  placeholder="Current password"
-                  value={twoFADisablePassword}
-                  onChange={e => setTwoFADisablePassword(e.target.value)}
-                  disabled={isLoading}
-                  style={{ marginBottom: "0.75rem" }}
-                />
-                <input
-                  type="text"
-                  className="settings-input twofa-otp-input"
-                  placeholder="000000"
-                  maxLength={6}
-                  value={twoFADisableCode}
-                  onChange={e => setTwoFADisableCode(e.target.value.replace(/\D/g, ""))}
-                  onKeyDown={e => e.key === "Enter" && handle2FADisable()}
-                  disabled={isLoading}
-                  style={{ marginBottom: "0.75rem", letterSpacing: "0.3em", textAlign: "center", fontSize: "1.4rem" }}
-                />
-                <div className="twofa-actions">
-                  <button className="twofa-btn-danger" onClick={handle2FADisable} disabled={isLoading}>
-                    {isLoading ? <div className="spinner-small" /> : "Confirm Disable"}
-                  </button>
-                  <button className="cancel-button" onClick={() => { setTwoFAStep("idle"); setTwoFADisablePassword(""); setTwoFADisableCode("") }}>Cancel</button>
-                </div>
               </div>
             )}
           </div>
@@ -853,126 +674,6 @@ function SettingsModal({ isOpen, onClose }) {
         @keyframes spin {
           0% { transform: rotate(0deg); }
           100% { transform: rotate(360deg); }
-        }
-
-        /* ── 2FA styles ── */
-        .twofa-status-row {
-          display: flex;
-          align-items: flex-start;
-          justify-content: space-between;
-          gap: 1rem;
-          flex-wrap: wrap;
-        }
-        .twofa-status-info { flex: 1; min-width: 0; }
-        .twofa-badge {
-          display: inline-flex;
-          align-items: center;
-          gap: 6px;
-          padding: 4px 12px;
-          border-radius: 999px;
-          font-size: 0.78rem;
-          font-weight: 700;
-          letter-spacing: 0.04em;
-          margin-bottom: 0.5rem;
-        }
-        .twofa-badge.enabled {
-          background: rgba(16,185,129,0.15);
-          color: #34d399;
-          border: 1px solid rgba(16,185,129,0.35);
-        }
-        .twofa-badge.disabled {
-          background: rgba(107,114,128,0.15);
-          color: #9ca3af;
-          border: 1px solid rgba(107,114,128,0.25);
-        }
-        .twofa-desc { font-size: 0.82rem; color: var(--text-secondary); line-height: 1.5; }
-
-        .twofa-btn-enable {
-          background: linear-gradient(135deg, var(--accent-primary), var(--accent-secondary));
-          border: none;
-          border-radius: 0.75rem;
-          color: white;
-          cursor: pointer;
-          font-size: 0.875rem;
-          font-weight: 600;
-          padding: 0.65rem 1.25rem;
-          transition: var(--transition);
-          white-space: nowrap;
-          flex-shrink: 0;
-        }
-        .twofa-btn-enable:hover { filter: brightness(1.1); transform: translateY(-1px); }
-
-        .twofa-btn-danger {
-          background: rgba(239,68,68,0.12);
-          border: 1px solid rgba(239,68,68,0.35);
-          border-radius: 0.75rem;
-          color: #f87171;
-          cursor: pointer;
-          font-size: 0.875rem;
-          font-weight: 600;
-          padding: 0.65rem 1.25rem;
-          transition: var(--transition);
-          white-space: nowrap;
-          flex-shrink: 0;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 6px;
-          min-width: 120px;
-        }
-        .twofa-btn-danger:hover:not(:disabled) { background: rgba(239,68,68,0.22); }
-        .twofa-btn-danger:disabled { opacity: 0.5; cursor: not-allowed; }
-
-        .twofa-step { display: flex; flex-direction: column; gap: 0.1rem; }
-        .twofa-step-title {
-          font-size: 0.85rem;
-          font-weight: 700;
-          color: var(--text-primary);
-          margin-bottom: 0.2rem;
-        }
-        .twofa-step-desc { font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.85rem; line-height: 1.5; }
-
-        .twofa-qr-wrap {
-          display: flex;
-          justify-content: center;
-          padding: 1rem;
-          background: #fff;
-          border-radius: 12px;
-          margin-bottom: 1rem;
-          width: fit-content;
-          align-self: center;
-        }
-        .twofa-qr { width: 180px; height: 180px; display: block; }
-
-        .twofa-manual {
-          margin-bottom: 0.5rem;
-          font-size: 0.8rem;
-          color: var(--text-secondary);
-          cursor: pointer;
-        }
-        .twofa-manual summary { padding: 0.4rem 0; user-select: none; }
-        .twofa-secret {
-          display: block;
-          background: var(--bg-primary);
-          border: 1px solid var(--border-color);
-          border-radius: 8px;
-          padding: 0.6rem 0.85rem;
-          font-family: monospace;
-          font-size: 0.78rem;
-          color: var(--accent-hover);
-          letter-spacing: 0.08em;
-          word-break: break-all;
-          margin-top: 0.4rem;
-          user-select: all;
-        }
-
-        .twofa-otp-input { font-family: monospace; }
-
-        .twofa-actions {
-          display: flex;
-          gap: 0.65rem;
-          flex-wrap: wrap;
-          margin-top: 0.25rem;
         }
 
         @media (max-width: 640px) {

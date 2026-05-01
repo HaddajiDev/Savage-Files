@@ -11,8 +11,6 @@ const isAuth = require('../middleware/passport');
 const { send } = require('process');
 const pending = require('../models/pending');
 const { sendVerificationEmail, sendPasswordResetEmail, sendConformationNewEmail } = require('../lib/sendEmail');
-const speakeasy = require('speakeasy');
-const QRCode = require('qrcode');
 
 router.post("/register", registerRules(), validation, async (request, result) => {
     try {
@@ -75,23 +73,16 @@ router.post('/login', loginRules(), validation, async (request, result) => {
             return;
         }       
 
-        // If 2FA is enabled, issue a short-lived temp token instead of full session
-        if (searchedUser.twoFactorEnabled) {
-            const tempPayload = { username: searchedUser.username, twoFactorPending: true };
-            const tempToken = await jwt.sign(tempPayload, process.env.SCTY_KEY, { expiresIn: '5m' });
-            return result.status(200).send({ requires2FA: true, tempToken });
-        }
-
         const payload = {
             username: searchedUser.username
         }
         const token = await jwt.sign(payload, process.env.SCTY_KEY, {
             expiresIn: '7d'
-        });
-        result.status(200).send({
-            user: searchedUser,
-            msg: 'User logged in successfully',
-            token: `bearer ${token}`
+        });        
+        result.status(200).send({ 
+            user: searchedUser, 
+            msg: 'User logged in successfully', 
+            token: `bearer ${token}` 
         });
     } catch (error) {
         console.error("Error during login:", error);
@@ -531,134 +522,5 @@ router.delete('/api-key', isAuth(), async (req, res) => {
 function generateApiKey() {
     return 'BO7-' + crypto.randomBytes(32).toString('hex');
 }
-
-// ─── 2FA Routes ───────────────────────────────────────────
-
-// Step 1: verify password, generate TOTP secret, return QR data URL
-router.post('/2fa/setup', isAuth(), async (req, res) => {
-    try {
-        const { password } = req.body;
-        if (!password) return res.status(400).json({ error: 'Password is required' });
-
-        // Re-fetch with password included (passport middleware strips it from req.user)
-        const userWithPassword = await User.findById(req.user._id);
-        const match = await bcrypt.compare(password, userWithPassword.password);
-        if (!match) return res.status(400).json({ error: 'Incorrect password' });
-
-        const issuer = 'Savage Files';
-        const secret = speakeasy.generateSecret({
-            name: `${issuer}:${req.user.username}`,
-            issuer,
-            length: 20,
-        });
-
-        // Rebuild otpauth URL with explicit issuer so authenticator apps label it correctly
-        const otpauthUrl = speakeasy.otpauthURL({
-            secret: secret.base32,
-            label: encodeURIComponent(`${issuer}:${req.user.username}`),
-            issuer,
-            encoding: 'base32',
-        });
-
-        // Store temp secret on user (not enabled yet — confirmed in /enable)
-        await User.findByIdAndUpdate(req.user._id, { twoFactorSecret: secret.base32 });
-
-        const qrDataUrl = await QRCode.toDataURL(otpauthUrl);
-        res.json({ qrDataUrl, secret: secret.base32 });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Failed to setup 2FA' });
-    }
-});
-
-// Step 2: user scanned QR, verify code, mark 2FA as enabled
-router.post('/2fa/enable', isAuth(), async (req, res) => {
-    try {
-        const { token } = req.body;
-        if (!token) return res.status(400).json({ error: 'Token is required' });
-
-        const user = await User.findById(req.user._id);
-        if (!user.twoFactorSecret) return res.status(400).json({ error: 'Run setup first' });
-
-        const valid = speakeasy.totp.verify({
-            secret: user.twoFactorSecret,
-            encoding: 'base32',
-            token,
-            window: 1,
-        });
-
-        if (!valid) return res.status(400).json({ error: 'Invalid code — try again' });
-
-        await User.findByIdAndUpdate(req.user._id, { twoFactorEnabled: true });
-        res.json({ msg: '2FA enabled successfully' });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Failed to enable 2FA' });
-    }
-});
-
-// Disable 2FA — requires current password + valid TOTP code
-router.post('/2fa/disable', isAuth(), async (req, res) => {
-    try {
-        const { password, token } = req.body;
-        if (!password || !token) return res.status(400).json({ error: 'Password and code are required' });
-
-        // Re-fetch with password included (passport middleware strips it from req.user)
-        const userWithPassword = await User.findById(req.user._id);
-        const match = await bcrypt.compare(password, userWithPassword.password);
-        if (!match) return res.status(400).json({ error: 'Incorrect password' });
-
-        const user = await User.findById(req.user._id);
-        const valid = speakeasy.totp.verify({
-            secret: user.twoFactorSecret,
-            encoding: 'base32',
-            token,
-            window: 1,
-        });
-
-        if (!valid) return res.status(400).json({ error: 'Invalid authenticator code' });
-
-        await User.findByIdAndUpdate(req.user._id, { twoFactorEnabled: false, twoFactorSecret: null });
-        res.json({ msg: '2FA disabled successfully' });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Failed to disable 2FA' });
-    }
-});
-
-// Login step 2: verify TOTP code using the 5-min tempToken
-router.post('/2fa/login-verify', async (req, res) => {
-    try {
-        const { tempToken, token } = req.body;
-        if (!tempToken || !token) return res.status(400).json({ error: 'Token and code are required' });
-
-        let decoded;
-        try {
-            decoded = jwt.verify(tempToken, process.env.SCTY_KEY);
-        } catch {
-            return res.status(401).json({ error: 'Session expired — please log in again' });
-        }
-
-        if (!decoded.twoFactorPending) return res.status(401).json({ error: 'Invalid token' });
-
-        const user = await User.findOne({ username: decoded.username });
-        if (!user) return res.status(404).json({ error: 'User not found' });
-
-        const valid = speakeasy.totp.verify({
-            secret: user.twoFactorSecret,
-            encoding: 'base32',
-            token,
-            window: 1,
-        });
-
-        if (!valid) return res.status(400).json({ error: 'Invalid authenticator code' });
-
-        const fullToken = await jwt.sign({ username: user.username }, process.env.SCTY_KEY, { expiresIn: '7d' });
-        res.json({ user, msg: 'Logged in successfully', token: `bearer ${fullToken}` });
-    } catch (err) {
-        console.error(err);
-        res.status(500).json({ error: 'Verification failed' });
-    }
-});
 
 module.exports = router;

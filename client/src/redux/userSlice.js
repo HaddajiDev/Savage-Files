@@ -284,43 +284,6 @@ export const verifyNewEmail = createAsyncThunk(
   }
 )
 
-// ─── 2FA thunks ───────────────────────────────────────────
-export const setup2FA = createAsyncThunk("user/2fa/setup", async (password, { rejectWithValue }) => {
-  try {
-    const res = await axios.post(link + "/2fa/setup", { password }, { headers: { Authorization: getCookie("token") } })
-    return res.data
-  } catch (err) {
-    return rejectWithValue(err.response?.data || { error: "Setup failed" })
-  }
-})
-
-export const enable2FA = createAsyncThunk("user/2fa/enable", async (token, { rejectWithValue }) => {
-  try {
-    const res = await axios.post(link + "/2fa/enable", { token }, { headers: { Authorization: getCookie("token") } })
-    return res.data
-  } catch (err) {
-    return rejectWithValue(err.response?.data || { error: "Enable failed" })
-  }
-})
-
-export const disable2FA = createAsyncThunk("user/2fa/disable", async ({ password, token }, { rejectWithValue }) => {
-  try {
-    const res = await axios.post(link + "/2fa/disable", { password, token }, { headers: { Authorization: getCookie("token") } })
-    return res.data
-  } catch (err) {
-    return rejectWithValue(err.response?.data || { error: "Disable failed" })
-  }
-})
-
-export const verify2FALogin = createAsyncThunk("user/2fa/login-verify", async ({ tempToken, token }, { rejectWithValue }) => {
-  try {
-    const res = await axios.post(link + "/2fa/login-verify", { tempToken, token })
-    return res.data
-  } catch (err) {
-    return rejectWithValue(err.response?.data || { error: "Verification failed" })
-  }
-})
-
 const initialState = {
   user: null,
   files: null,
@@ -331,8 +294,6 @@ const initialState = {
     total: 1073741824,
     fileCount: 0
   },
-  twoFactorPending: false,
-  tempToken: null,
   error: "",
   status: null,
   loading: false,
@@ -348,8 +309,6 @@ export const userSlice = createSlice({
       state.folders = []
       state.user = null
       state.apiKey = null
-      state.twoFactorPending = false
-      state.tempToken = null
       state.storageUsage = {
         used: 0,
         total: 1073741824,
@@ -391,17 +350,10 @@ export const userSlice = createSlice({
         state.loading = true
       })
       .addCase(userLogin.fulfilled, (state, action) => {
-        if (action.payload.requires2FA) {
-          state.twoFactorPending = true
-          state.tempToken = action.payload.tempToken
-          state.loading = false
-          state.status = "2fa_required"
-        } else {
-          state.status = "succeeded"
-          state.user = action.payload.user
-          state.loading = false
-          setCookie("token", action.payload.token, 7)
-        }
+        state.status = "succeeded"
+        state.user = action.payload.user
+        state.loading = false
+        setCookie("token", action.payload.token, 7)
       })
       .addCase(userLogin.rejected, (state, action) => {
         state.status = "failed"
@@ -636,27 +588,8 @@ export const userSlice = createSlice({
           const idx = state.folders.findIndex(f => f._id === action.payload.folder._id)
           if (idx !== -1) state.folders[idx] = action.payload.folder
         }
-      })
-
-      // 2FA cases
-      .addCase(enable2FA.fulfilled, (state) => {
-        if (state.user) state.user.twoFactorEnabled = true
-      })
-      .addCase(disable2FA.fulfilled, (state) => {
-        if (state.user) state.user.twoFactorEnabled = false
-      })
-      .addCase(verify2FALogin.fulfilled, (state, action) => {
-        state.user = action.payload.user
-        state.twoFactorPending = false
-        state.tempToken = null
-        state.loading = false
-        state.status = "succeeded"
-        setCookie("token", action.payload.token, 7)
-      })
-      .addCase(verify2FALogin.rejected, (state, action) => {
-        state.error = action.payload?.error || "Invalid code"
-        state.loading = false
       });
+
 
   },
 })
