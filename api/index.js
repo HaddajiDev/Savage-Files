@@ -4,13 +4,15 @@ const mongoose = require("mongoose");
 const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
+//
+
 const connect = require('./db_connect');
 const fileRoutes = require('./routes/file');
 const { GridFSBucket } = require('mongodb');
 
 const app = express();
 const corsOptions = {
-    origin: ['http://localhost:3000', "https://savage-files.vercel.app"],
+    origin: ["*"],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization'],
