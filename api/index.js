@@ -11,8 +11,16 @@ const fileRoutes = require('./routes/file');
 const { GridFSBucket } = require('mongodb');
 
 const app = express();
+const allowedOrigins = ['http://localhost:3000', 'https://savage-files.vercel.app'];
+
 const corsOptions = {
-    origin: ["*"],
+    origin: (origin, callback) => {
+        if (!origin || allowedOrigins.includes(origin)) {
+            callback(null, true);
+        } else {
+            callback(new Error('Not allowed by CORS'));
+        }
+    },
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE'],
     allowedHeaders: ['Content-Type', 'Authorization'],
