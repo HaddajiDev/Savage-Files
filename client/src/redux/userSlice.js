@@ -53,7 +53,9 @@ export const currentUser = createAsyncThunk("user/current", async (_, { rejectWi
 
 export const GetUserFiles = createAsyncThunk("user/files", async (userId, { rejectWithValue }) => {
   try {
-    const result = await axios.get(link_files + `/all/${userId}`)
+    const result = await axios.get(link_files + `/all/${userId}`, {
+      headers: { Authorization: getCookie("token") },
+    })
     return result.data
   } catch (error) {
     console.log(error)
@@ -66,6 +68,7 @@ export const uploadFile = createAsyncThunk("user/upload", async ({ userId, file 
     const result = await axios.post(link_files + `/upload/${userId}`, file, {
       headers: {
         "Content-Type": "multipart/form-data",
+        Authorization: getCookie("token"),
       },
     })
     return result.data
@@ -77,7 +80,9 @@ export const uploadFile = createAsyncThunk("user/upload", async ({ userId, file 
 
 export const GetUserFolders = createAsyncThunk("user/folders", async (userId, { rejectWithValue }) => {
   try {
-    const result = await axios.get(link_files + `/folders/${userId}`)
+    const result = await axios.get(link_files + `/folders/${userId}`, {
+      headers: { Authorization: getCookie("token") },
+    })
     return result.data
   } catch (error) {
     return rejectWithValue(error.response?.data || "Failed to get folders")
@@ -86,7 +91,9 @@ export const GetUserFolders = createAsyncThunk("user/folders", async (userId, { 
 
 export const CreateFolder = createAsyncThunk("user/createFolder", async ({ userId, name }, { rejectWithValue }) => {
   try {
-    const result = await axios.post(link_files + `/folders/create`, { userId, name })
+    const result = await axios.post(link_files + `/folders/create`, { userId, name }, {
+      headers: { Authorization: getCookie("token") },
+    })
     return result.data
   } catch (error) {
     return rejectWithValue(error.response?.data || "Failed to create folder")
@@ -95,7 +102,9 @@ export const CreateFolder = createAsyncThunk("user/createFolder", async ({ userI
 
 export const DeleteFolder = createAsyncThunk("user/deleteFolder", async ({ folderId, userId }, { rejectWithValue }) => {
   try {
-    const result = await axios.delete(link_files + `/folders/${folderId}/${userId}`)
+    const result = await axios.delete(link_files + `/folders/${folderId}/${userId}`, {
+      headers: { Authorization: getCookie("token") },
+    })
     return result.data
   } catch (error) {
     return rejectWithValue(error.response?.data || "Failed to delete folder")
@@ -104,7 +113,9 @@ export const DeleteFolder = createAsyncThunk("user/deleteFolder", async ({ folde
 
 export const RenameFolder = createAsyncThunk("user/renameFolder", async ({ folderId, userId, name }, { rejectWithValue }) => {
   try {
-    const result = await axios.put(link_files + `/folders/rename/${folderId}`, { userId, name })
+    const result = await axios.put(link_files + `/folders/rename/${folderId}`, { userId, name }, {
+      headers: { Authorization: getCookie("token") },
+    })
     return result.data
   } catch (error) {
     return rejectWithValue(error.response?.data || "Failed to rename folder")
@@ -113,7 +124,9 @@ export const RenameFolder = createAsyncThunk("user/renameFolder", async ({ folde
 
 export const ToggleVisibility = createAsyncThunk("user/toggleVisibility", async ({ fileId, userId }, { rejectWithValue }) => {
   try {
-    const result = await axios.put(link_files + `/visibility/${fileId}`, { userId })
+    const result = await axios.put(link_files + `/visibility/${fileId}`, { userId }, {
+      headers: { Authorization: getCookie("token") },
+    })
     return { fileId, isPublic: result.data.isPublic }
   } catch (error) {
     return rejectWithValue(error.response?.data || "Failed to update visibility")
@@ -122,7 +135,9 @@ export const ToggleVisibility = createAsyncThunk("user/toggleVisibility", async 
 
 export const MoveFile = createAsyncThunk("user/moveFile", async ({ fileId, userId, folderId }, { rejectWithValue }) => {
   try {
-    const result = await axios.put(link_files + `/move/${fileId}`, { userId, folderId })
+    const result = await axios.put(link_files + `/move/${fileId}`, { userId, folderId }, {
+      headers: { Authorization: getCookie("token") },
+    })
     return result.data
   } catch (error) {
     return rejectWithValue(error.response?.data || "Failed to move file")
@@ -131,7 +146,9 @@ export const MoveFile = createAsyncThunk("user/moveFile", async ({ fileId, userI
 
 export const DeleteFile = createAsyncThunk("user/delete", async ({ fileId, userId }, { rejectWithValue }) => {
   try {
-    const result = await axios.delete(link_files + `/delete/${fileId}/${userId}`)
+    const result = await axios.delete(link_files + `/delete/${fileId}/${userId}`, {
+      headers: { Authorization: getCookie("token") },
+    })
     return result.data
   } catch (error) {
     console.log(error)

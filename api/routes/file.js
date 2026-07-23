@@ -14,6 +14,7 @@ const allFiles = require('../models/allFiles');
 const Folder = require('../models/folder');
 const User = require('../models/user');
 const { uploadToB2, downloadFromB2, deleteFromB2 } = require('../b2');
+const isAuth = require('../middleware/passport');
 
 
 function verifyToken(req) {
@@ -55,7 +56,7 @@ module.exports = (db, bucket) => {
         }
     };
 
-    router.post('/upload/:id', (req, res, next) => {
+    router.post('/upload/:id', isAuth(), (req, res, next) => {
         webUpload.single('file')(req, res, (err) => {
             if (err?.code === 'LIMIT_FILE_SIZE') {
                 return res.status(413).send(`File exceeds the ${WEB_FILE_SIZE_LIMIT / (1024 * 1024)} MB limit`);
@@ -69,7 +70,7 @@ module.exports = (db, bucket) => {
         }
 
         try {
-            const userId = req.params.id;
+            const userId = req.user._id.toString();
             const storageLimit = 5368709120; // 5 GB
 
             const userFiles = await allFiles.find({ userId });
@@ -180,9 +181,9 @@ module.exports = (db, bucket) => {
         }
     });
 
-    router.get('/all/:id', async(req, res) => {
+    router.get('/all/:id', isAuth(), async(req, res) => {
         try {
-            const userfiles = await allFiles.find({userId: req.params.id});
+            const userfiles = await allFiles.find({userId: req.user._id});
 
             const fileList = userfiles.map(userFileEntry => {
                 return {
@@ -205,9 +206,9 @@ module.exports = (db, bucket) => {
     });
 
     
-    router.put('/visibility/:fileId', async (req, res) => {
+    router.put('/visibility/:fileId', isAuth(), async (req, res) => {
         try {
-            const { userId } = req.body;
+            const userId = req.user._id;
             const objectID = new ObjectId(req.params.fileId);
             const file = await allFiles.findOne({ fileId: objectID, userId });
             if (!file) return res.status(404).send({ error: 'File not found' });
@@ -221,11 +222,12 @@ module.exports = (db, bucket) => {
     });
 
     
-    router.post('/folders/create', async (req, res) => {
+    router.post('/folders/create', isAuth(), async (req, res) => {
         try {
-            const { userId, name } = req.body;
-            if (!userId || !name || !name.trim()) {
-                return res.status(400).send({ error: 'userId and name are required' });
+            const userId = req.user._id;
+            const { name } = req.body;
+            if (!name || !name.trim()) {
+                return res.status(400).send({ error: 'name is required' });
             }
             const folder = new Folder({ userId, name: name.trim() });
             await folder.save();
@@ -236,9 +238,9 @@ module.exports = (db, bucket) => {
         }
     });
 
-    router.get('/folders/:userId', async (req, res) => {
+    router.get('/folders/:userId', isAuth(), async (req, res) => {
         try {
-            const folders = await Folder.find({ userId: req.params.userId }).sort({ createdAt: -1 });
+            const folders = await Folder.find({ userId: req.user._id }).sort({ createdAt: -1 });
             res.status(200).send({ folders });
         } catch (error) {
             console.error(error);
@@ -246,9 +248,9 @@ module.exports = (db, bucket) => {
         }
     });
 
-    router.delete('/folders/:folderId/:userId', async (req, res) => {
+    router.delete('/folders/:folderId/:userId', isAuth(), async (req, res) => {
         try {
-            const folder = await Folder.findOne({ _id: req.params.folderId, userId: req.params.userId });
+            const folder = await Folder.findOne({ _id: req.params.folderId, userId: req.user._id });
             if (!folder) return res.status(404).send({ error: 'Folder not found' });
 
             
@@ -261,9 +263,10 @@ module.exports = (db, bucket) => {
         }
     });
 
-    router.put('/folders/rename/:folderId', async (req, res) => {
+    router.put('/folders/rename/:folderId', isAuth(), async (req, res) => {
         try {
-            const { userId, name } = req.body;
+            const userId = req.user._id;
+            const { name } = req.body;
             if (!name || !name.trim()) return res.status(400).send({ error: 'Name is required' });
             const folder = await Folder.findOneAndUpdate(
                 { _id: req.params.folderId, userId },
@@ -278,9 +281,10 @@ module.exports = (db, bucket) => {
         }
     });
 
-    router.put('/move/:fileId', async (req, res) => {
+    router.put('/move/:fileId', isAuth(), async (req, res) => {
         try {
-            const { userId, folderId } = req.body;
+            const userId = req.user._id;
+            const { folderId } = req.body;
             const objectID = new ObjectId(req.params.fileId);
             const file = await allFiles.findOne({ fileId: objectID, userId });
             if (!file) return res.status(404).send({ error: 'File not found' });
@@ -300,12 +304,12 @@ module.exports = (db, bucket) => {
         }
     });
 
-    router.delete('/delete/:file/:userId', async (req, res) => {
+    router.delete('/delete/:file/:userId', isAuth(), async (req, res) => {
         try {
             const idField = new ObjectId(req.params.file);
 
             const currentFile = await allFiles.findOne({fileId: idField});
-            if (!currentFile || currentFile.userId.toString() !== req.params.userId.toString()) {
+            if (!currentFile || currentFile.userId.toString() !== req.user._id.toString()) {
                 return res.status(404).send(`<h1>Not Authorized</h1>`);
             }
 
@@ -327,10 +331,10 @@ module.exports = (db, bucket) => {
         }
     });
 
-    router.get('/storage/:userId', async (req, res) => {
+    router.get('/storage/:userId', isAuth(), async (req, res) => {
         try {
-            const userId = req.params.userId;
-            const storageLimit = 5368709120; 
+            const userId = req.user._id;
+            const storageLimit = 5368709120;
 
             const userFiles = await allFiles.find({ userId: userId });
 
