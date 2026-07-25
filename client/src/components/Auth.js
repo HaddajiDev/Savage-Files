@@ -1,9 +1,9 @@
 "use client"
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef, useCallback } from "react"
 import { useDispatch, useSelector } from "react-redux"
 import { Link } from "react-router-dom"
-import { resetPassword, userLogin, userRegister } from "../redux/userSlice"
+import { resetPassword, userLogin, userRegister, googleAuth } from "../redux/userSlice"
 import { useNavigate } from "react-router-dom"
 
 function Auth() {
@@ -20,6 +20,8 @@ function Auth() {
   const dispatch = useDispatch()
   const navigate = useNavigate()
   const { status, error } = useSelector((state) => state.user)
+  const googleTokenClientRef = useRef(null)
+  const [googleLoading, setGoogleLoading] = useState(false)
 
   const [passwordErrors, setPasswordErrors] = useState({
     length: false, uppercase: false, lowercase: false, number: false, specialChar: false,
@@ -62,6 +64,48 @@ function Auth() {
   }
 
   const handleKeyDown = (e) => { if (e.key === "Enter") handleAuth() }
+
+  const handleGoogleToken = useCallback(async (tokenResponse) => {
+    if (tokenResponse.error) {
+      setGoogleLoading(false)
+      return
+    }
+    try {
+      const result = await dispatch(googleAuth(tokenResponse.access_token)).unwrap()
+      if (result) navigate("/profile")
+    } catch (err) {
+      console.error("Google sign-in failed:", err)
+    } finally {
+      setGoogleLoading(false)
+    }
+  }, [dispatch, navigate])
+
+  useEffect(() => {
+    const clientId = process.env.REACT_APP_GOOGLE_CLIENT_ID
+    if (!clientId) return
+
+    let cancelled = false
+    const tryInit = () => {
+      if (cancelled) return
+      if (!window.google?.accounts?.oauth2) {
+        setTimeout(tryInit, 150)
+        return
+      }
+      googleTokenClientRef.current = window.google.accounts.oauth2.initTokenClient({
+        client_id: clientId,
+        scope: "openid email profile",
+        callback: handleGoogleToken,
+      })
+    }
+    tryInit()
+    return () => { cancelled = true }
+  }, [handleGoogleToken])
+
+  const handleGoogleClick = () => {
+    if (!googleTokenClientRef.current) return
+    setGoogleLoading(true)
+    googleTokenClientRef.current.requestAccessToken()
+  }
 
   const handleSwitchMode = (login) => {
     setIsLogin(login)
@@ -132,9 +176,14 @@ function Auth() {
             </ul>
 
             <div className="auth2-side-quote">
-              <span className="auth2-quote-mark">"</span>
-              The cleanest little file host I've used.
-              <span className="auth2-quote-by">— GitHub user</span>
+              <span className="auth2-quote-mark"><QuoteIcon /></span>
+              <p className="auth2-quote-text">
+                The cleanest little file host I&rsquo;ve used.
+              </p>
+              <div className="auth2-quote-attribution">
+                <span className="auth2-quote-avatar">GH</span>
+                <span className="auth2-quote-name">GitHub user</span>
+              </div>
             </div>
           </div>
         </aside>
@@ -308,6 +357,25 @@ function Auth() {
                   )}
                 </button>
 
+                {process.env.REACT_APP_GOOGLE_CLIENT_ID && (
+                  <>
+                    <div className="auth2-divider"><span>or</span></div>
+                    <button
+                      type="button"
+                      className="auth2-google-submit"
+                      onClick={handleGoogleClick}
+                      disabled={googleLoading}
+                    >
+                      {googleLoading ? <Spinner /> : (
+                        <>
+                          <GoogleIcon />
+                          {isLogin ? "Sign in with Google" : "Sign up with Google"}
+                        </>
+                      )}
+                    </button>
+                  </>
+                )}
+
                 <p className="auth2-switch">
                   {isLogin ? "New here?" : "Already a member?"}{" "}
                   <button
@@ -422,6 +490,19 @@ const CheckPill = () => (<svg width="14" height="14" viewBox="0 0 24 24" fill="n
 const TinyCheck = () => (<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3"><polyline points="20 6 9 17 4 12"/></svg>)
 const TinyDot = () => (<svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="6"/></svg>)
 const Spinner = () => <span className="auth2-spinner" />
+const QuoteIcon = () => (
+  <svg width="15" height="15" viewBox="0 0 24 24" fill="currentColor">
+    <path d="M4.5 6.5A3.5 3.5 0 0 1 8 3v2.2a1.3 1.3 0 0 0-1.3 1.3v1h1.8v5.5h-5V6.5Zm9 0A3.5 3.5 0 0 1 17 3v2.2a1.3 1.3 0 0 0-1.3 1.3v1h1.8v5.5h-5V6.5Z"/>
+  </svg>
+)
+const GoogleIcon = () => (
+  <svg width="18" height="18" viewBox="0 0 18 18">
+    <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.9c1.7-1.57 2.7-3.87 2.7-6.62z"/>
+    <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.9-2.26c-.8.54-1.84.86-3.06.86-2.35 0-4.34-1.59-5.05-3.72H.98v2.33A9 9 0 0 0 9 18z"/>
+    <path fill="#FBBC05" d="M3.95 10.7A5.4 5.4 0 0 1 3.67 9c0-.59.1-1.17.28-1.7V4.97H.98A9 9 0 0 0 0 9c0 1.45.35 2.83.98 4.03z"/>
+    <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .98 4.97L3.95 7.3C4.66 5.17 6.65 3.58 9 3.58z"/>
+  </svg>
+)
 
 /* ── Styles ───────────────────────────────────────────────── */
 function AuthStyles() {
@@ -592,28 +673,56 @@ function AuthStyles() {
       }
       .auth2-side-quote {
         margin-top: 2.5rem;
-        padding: 1.1rem 1.2rem;
+        padding: 1.4rem 1.4rem 1.3rem;
         background: rgba(0,0,0,.25);
         border: 1px solid rgba(168,85,247,.18);
-        border-radius: 14px;
-        font-size: .88rem;
-        color: #c4b8dc;
-        line-height: 1.5;
+        border-radius: 16px;
         position: relative;
       }
       .auth2-quote-mark {
-        position: absolute;
-        top: -.2rem; left: .8rem;
-        font-size: 2.4rem;
-        font-family: Georgia, serif;
-        color: rgba(168,85,247,.5);
-        line-height: 1;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 30px;
+        height: 30px;
+        border-radius: 9px;
+        background: rgba(168,85,247,.14);
+        color: #c084fc;
+        margin-bottom: .8rem;
       }
-      .auth2-quote-by {
-        display: block;
-        margin-top: .55rem;
-        font-size: .78rem;
-        color: #6f6789;
+      .auth2-quote-text {
+        margin: 0 0 1.1rem;
+        font-size: .98rem;
+        font-weight: 500;
+        line-height: 1.55;
+        color: #ece8f7;
+        letter-spacing: -.1px;
+      }
+      .auth2-quote-attribution {
+        display: flex;
+        align-items: center;
+        gap: .6rem;
+        padding-top: .95rem;
+        border-top: 1px solid rgba(168,85,247,.12);
+      }
+      .auth2-quote-avatar {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 28px;
+        height: 28px;
+        flex-shrink: 0;
+        border-radius: 50%;
+        background: linear-gradient(135deg, #a855f7, #6d28d9);
+        color: #fff;
+        font-size: .68rem;
+        font-weight: 700;
+        letter-spacing: .02em;
+      }
+      .auth2-quote-name {
+        font-size: .82rem;
+        font-weight: 600;
+        color: #c4b8dc;
       }
 
       /* Main panel */
@@ -898,6 +1007,44 @@ function AuthStyles() {
         transition: color .2s;
       }
       .auth2-back-btn:hover { color: #c4b8dc; }
+
+      .auth2-divider {
+        display: flex; align-items: center; gap: .75rem;
+        margin: 1.35rem 0 1.1rem;
+        color: #6f6789;
+        font-size: .78rem;
+        text-transform: uppercase;
+        letter-spacing: .06em;
+      }
+      .auth2-divider::before, .auth2-divider::after {
+        content: "";
+        flex: 1;
+        height: 1px;
+        background: rgba(168,85,247,.16);
+      }
+      .auth2-google-submit {
+        width: 100%;
+        padding: .9rem 1rem;
+        background: rgba(255,255,255,.04);
+        border: 1px solid rgba(168,85,247,.18);
+        border-radius: 13px;
+        color: #ece8f7;
+        font-size: .92rem;
+        font-weight: 600;
+        font-family: inherit;
+        cursor: pointer;
+        display: inline-flex; align-items: center; justify-content: center;
+        gap: .6rem;
+        min-height: 50px;
+        transition: background .2s ease, border-color .2s ease, transform .12s ease;
+      }
+      .auth2-google-submit:hover:not(:disabled) {
+        background: rgba(255,255,255,.07);
+        border-color: rgba(168,85,247,.4);
+        transform: translateY(-1px);
+      }
+      .auth2-google-submit:active:not(:disabled) { transform: translateY(0) scale(.99); }
+      .auth2-google-submit:disabled { opacity: .6; cursor: not-allowed; }
 
       .auth2-switch {
         text-align: center;

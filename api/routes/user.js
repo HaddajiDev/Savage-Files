@@ -6,6 +6,15 @@ const router = express.Router();
 const bcrypt = require('bcrypt');
 var jwt = require('jsonwebtoken');
 
+async function uniqueUsernameFromEmail(email) {
+    const base = email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '').slice(0, 20) || 'user';
+    let candidate = base;
+    while (await User.findOne({ username: candidate })) {
+        candidate = `${base}${Math.floor(1000 + Math.random() * 9000)}`;
+    }
+    return candidate;
+}
+
 const {loginRules, registerRules, validation} = require('../middleware/validator');
 const isAuth = require('../middleware/passport');
 const { send } = require('process');
@@ -91,7 +100,68 @@ router.post('/login', loginRules(), validation, async (request, result) => {
 });
 
 
-router.get('/current', isAuth(), (request, result) => {    
+router.post('/google', async (req, res) => {
+    try {
+        const { access_token } = req.body;
+        if (!access_token) {
+            return res.status(400).send({ error: 'Missing Google access token' });
+        }
+
+        let payload;
+        try {
+            const googleRes = await fetch('https://www.googleapis.com/oauth2/v3/userinfo', {
+                headers: { Authorization: `Bearer ${access_token}` },
+            });
+            if (!googleRes.ok) throw new Error('userinfo request failed');
+            payload = await googleRes.json();
+        } catch (err) {
+            return res.status(401).send({ error: 'Invalid Google access token' });
+        }
+
+        if (!payload?.email) {
+            return res.status(401).send({ error: 'Google account has no email' });
+        }
+
+        let user = await User.findOne({ googleId: payload.sub });
+
+        if (!user) {
+            user = await User.findOne({ email: payload.email });
+            if (user) {
+                // Auto-link: an account with this email already exists via password sign-up.
+                user.googleId = payload.sub;
+                if (payload.email_verified) {
+                    user.verified = true;
+                    user.emailVerified = true;
+                }
+                await user.save();
+            }
+        }
+
+        if (!user) {
+            const username = await uniqueUsernameFromEmail(payload.email);
+            user = new User({
+                username,
+                email: payload.email,
+                googleId: payload.sub,
+                verified: !!payload.email_verified,
+                emailVerified: !!payload.email_verified,
+            });
+            await user.save();
+        }
+
+        const token = await jwt.sign({ username: user.username }, process.env.SCTY_KEY, {
+            expiresIn: '7d'
+        });
+
+        res.status(200).send({ user, msg: 'Signed in with Google', token: `bearer ${token}` });
+    } catch (error) {
+        console.error('Google auth error:', error);
+        res.status(500).send({ error: 'Google sign-in failed' });
+    }
+});
+
+
+router.get('/current', isAuth(), (request, result) => {
     result.status(200).send({user: request.user});
 });
 

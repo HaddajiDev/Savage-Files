@@ -37,6 +37,15 @@ export const userLogin = createAsyncThunk("user/login", async (user, { rejectWit
   }
 })
 
+export const googleAuth = createAsyncThunk("user/google", async (access_token, { rejectWithValue }) => {
+  try {
+    const result = await axios.post(link + "/google", { access_token })
+    return result.data
+  } catch (error) {
+    return rejectWithValue(error.response?.data || "Google sign-in failed")
+  }
+})
+
 export const currentUser = createAsyncThunk("user/current", async (_, { rejectWithValue }) => {
   try {
     const result = await axios.get(link + "/current", {
@@ -375,6 +384,23 @@ export const userSlice = createSlice({
       .addCase(userLogin.rejected, (state, action) => {
         state.status = "failed"
         state.error = action.payload?.error || "Login failed"
+        state.loading = false
+      })
+
+      .addCase(googleAuth.pending, (state) => {
+        state.status = "pending"
+        state.error = ""
+        state.loading = true
+      })
+      .addCase(googleAuth.fulfilled, (state, action) => {
+        state.status = "succeeded"
+        state.user = action.payload.user
+        state.loading = false
+        setCookie("token", action.payload.token, 7)
+      })
+      .addCase(googleAuth.rejected, (state, action) => {
+        state.status = "failed"
+        state.error = action.payload?.error || "Google sign-in failed"
         state.loading = false
       })
 
