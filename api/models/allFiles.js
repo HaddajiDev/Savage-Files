@@ -7,11 +7,11 @@ const FilesSchema = new mongoose.Schema({
     size: {type: String},
     sizeBytes: {type: Number, default: 0},
     b2Key: {type: String, default: null},
-    veiws: {type: Number, default: 0},
+    veiws: {type: Number, default: 0, alias: 'views'},
     downloads: {type: Number, default: 0},
     isPublic: {type: Boolean, default: false},
     folderId: {type: mongoose.Schema.Types.ObjectId, default: null},
-    createdAt: {type: Date, default: Date.now()}
+    createdAt: {type: Date, default: Date.now}
 });
 
 module.exports = mongoose.model('Files', FilesSchema);

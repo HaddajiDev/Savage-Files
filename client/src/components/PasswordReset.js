@@ -21,7 +21,10 @@ function PasswordReset() {
   const [showRequirements, setShowRequirements] = useState(false)
 
   const location = useLocation()
-  const token = useMemo(() => new URLSearchParams(location.search).get("token"), [location.search])
+  const token = useMemo(
+    () => new URLSearchParams(location.hash.slice(1)).get("token") || new URLSearchParams(location.search).get("token"),
+    [location.hash, location.search]
+  )
 
   const passwordErrors = useMemo(() => ({
     length: newPassword.length >= 8,

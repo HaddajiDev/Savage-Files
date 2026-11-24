@@ -1045,19 +1045,6 @@ nav button:hover {
   margin-bottom: 1rem;
 }
 
-.method {
-  background: var(--accent-primary);
-  color: white;
-  padding: 0.25rem 0.75rem;
-  border-radius: 4px;
-  font-size: 0.875rem;
-  font-weight: 600;
-}
-
-.method.get {
-  background: var(--success);
-}
-
 .url {
   font-family: "Courier New", monospace;
   background: var(--bg-primary);

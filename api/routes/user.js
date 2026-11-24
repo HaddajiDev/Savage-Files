@@ -1,13 +1,27 @@
 const express = require('express');
-const User = require('../models/user');
 const crypto = require('crypto');
+const bcrypt = require('bcrypt');
+const jwt = require('jsonwebtoken');
+
+const User = require('../models/user');
+const Pending = require('../models/pending');
+const isAuth = require('../middleware/passport');
+const { requireVerified } = require('../middleware/passport');
+const { loginRules, registerRules, newPasswordRules, emailRules, validation } = require('../middleware/validator');
+const { sendVerificationEmail, sendPasswordResetEmail, sendConformationNewEmail } = require('../lib/sendEmail');
+const tokens = require('../lib/tokens');
+const { PURPOSES } = tokens;
 
 const router = express.Router();
-const bcrypt = require('bcrypt');
-var jwt = require('jsonwebtoken');
+
+const BCRYPT_ROUNDS = 10;
+const FIRST_PASSWORD_WINDOW_SECONDS = 15 * 60;
+const CASE_INSENSITIVE = { locale: 'en', strength: 2 };
+
+const findByEmail = (email) => User.findOne({ email }).collation(CASE_INSENSITIVE);
 
 async function uniqueUsernameFromEmail(email) {
-    const base = email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '').slice(0, 20) || 'user';
+    const base = email.split('@')[0].replace(/[^a-zA-Z0-9_]/g, '').slice(0, 12) || 'user';
     let candidate = base;
     while (await User.findOne({ username: candidate })) {
         candidate = `${base}${Math.floor(1000 + Math.random() * 9000)}`;
@@ -15,87 +29,86 @@ async function uniqueUsernameFromEmail(email) {
     return candidate;
 }
 
-const {loginRules, registerRules, validation} = require('../middleware/validator');
-const isAuth = require('../middleware/passport');
-const { send } = require('process');
-const pending = require('../models/pending');
-const { sendVerificationEmail, sendPasswordResetEmail, sendConformationNewEmail } = require('../lib/sendEmail');
+function frontendUrl(path) {
+    return (process.env.FRONTLINK || '') + path;
+}
 
-router.post("/register", registerRules(), validation, async (request, result) => {
+async function createPendingEmail(user, email, purpose) {
+    const token = tokens.sign(purpose, { userId: user._id, email }, '24h');
+    await Pending.deleteMany({ $or: [{ userId: user._id }, { email }] });
+    await new Pending({ userId: user._id, email, purpose, token }).save();
+
+    const send = purpose === PURPOSES.EMAIL_CHANGE ? sendConformationNewEmail : sendVerificationEmail;
+    return send(email, user.username, token);
+}
+
+async function consumePendingEmail(token, purpose) {
+    let decoded;
     try {
-        const search = await User.findOne({ username: request.body.username });
-        if (search) {
-            return result.status(400).send({error :'username already exists'});
-        }
-        const emailSearch = await User.findOne({ email: request.body.email });
-        if (emailSearch) {
-            return result.status(400).send({error :'email already exists'});
-        }
-        const salt = 10;
-        const genSalt = await bcrypt.genSalt(salt);
-        const hashed_password = await bcrypt.hash(request.body.password, genSalt);		
-
-        let newUser = new User({
-            username: request.body.username,
-            email: request.body.email,
-            password: hashed_password,
-            verified: false,
-            emailVerified: false
-        });
-
-        let res = await newUser.save();
-
-		const payload = {
-			username: res.username
-		}
-		const token = await jwt.sign(payload, process.env.SCTY_KEY, {
-			expiresIn: '7d'
-		});
-        
-        result.status(200).send({ user: res, msg: "user added", token: `bearer ${token}` });
-   
-    } catch (error) {
-        console.error(error);
-        result.status(500).send({error :'Something went wrong'});
+        decoded = jwt.verify(String(token || ''), process.env.SCTY_KEY);
+    } catch {
+        return null;
     }
-});
+    if (decoded.purpose && decoded.purpose !== purpose) return null;
+    if (!decoded.userId) return null;
 
-router.post('/login', loginRules(), validation, async (request, result) => {
-    const { username, password } = request.body;
+    const entry = await Pending.findOne({ userId: decoded.userId, token });
+    if (!entry || entry.purpose !== purpose) return null;
+    await entry.deleteOne();
+    return entry;
+}
+
+
+async function register(req, res) {
     try {
-        const searchedUser = await User.findOne({
-            $or: [
-                { username: username },
-                { email: username }
-            ]
-        });
-        
-        if (!searchedUser) {
-            result.status(400).send({error: "User not found"});
-            return;
+        const { username, email, password } = req.body;
+
+        if (await User.findOne({ username })) {
+            return res.status(400).send({ error: 'username already exists' });
+        }
+        if (await findByEmail(email)) {
+            return res.status(400).send({ error: 'email already exists' });
         }
 
-        const match = await bcrypt.compare(password, searchedUser.password);
+        const user = await new User({
+            username,
+            email,
+            password: await bcrypt.hash(password, BCRYPT_ROUNDS),
+            verified: false,
+            emailVerified: false,
+        }).save();
 
+        await createPendingEmail(user, email, PURPOSES.VERIFY_EMAIL);
+
+        res.status(200).send({ user, msg: 'user added', token: tokens.signAuth(user) });
+    } catch (error) {
+        console.error('Registration error:', error);
+        res.status(500).send({ error: 'Something went wrong' });
+    }
+}
+
+router.post('/register', registerRules(), validation, register);
+router.post('/send/add-email', registerRules(), validation, register);
+
+
+router.post('/login', loginRules(), validation, async (req, res) => {
+    const { username, password } = req.body;
+    try {
+        const user = await User.findOne({ username }) || await findByEmail(username);
+
+        const match = user?.password && await bcrypt.compare(password, user.password);
         if (!match) {
-            result.status(400).send({error: "Invalid credentials"});
-            return;
-        }       
-
-        const payload = {
-            username: searchedUser.username
+            return res.status(400).send({ error: 'Invalid username or password' });
         }
-        const token = await jwt.sign(payload, process.env.SCTY_KEY, {
-            expiresIn: '7d'
-        });        
-        result.status(200).send({ 
-            user: searchedUser, 
-            msg: 'User logged in successfully', 
-            token: `bearer ${token}` 
+
+        res.status(200).send({
+            user,
+            msg: 'User logged in successfully',
+            token: tokens.signAuth(user),
         });
     } catch (error) {
-        console.error("Error during login:", error);
-        result.status(500).send({error: "Login Failed"});
+        console.error('Error during login:', error);
+        res.status(500).send({ error: 'Login Failed' });
     }
 });
 
@@ -125,35 +138,29 @@ router.post('/google', async (req, res) => {
         let user = await User.findOne({ googleId: payload.sub });
 
         if (!user) {
-            user = await User.findOne({ email: payload.email });
-            if (user) {
-                // Auto-link: an account with this email already exists via password sign-up.
-                user.googleId = payload.sub;
-                if (payload.email_verified) {
-                    user.verified = true;
-                    user.emailVerified = true;
+            const existing = await findByEmail(payload.email);
+            if (existing) {
+                if (!payload.email_verified) {
+                    return res.status(409).send({ error: 'An account with this email already exists. Sign in with your password.' });
                 }
-                await user.save();
+                existing.googleId = payload.sub;
+                existing.verified = true;
+                existing.emailVerified = true;
+                user = await existing.save();
             }
         }
 
         if (!user) {
-            const username = await uniqueUsernameFromEmail(payload.email);
-            user = new User({
-                username,
-                email: payload.email,
+            user = await new User({
+                username: await uniqueUsernameFromEmail(payload.email),
+                email: payload.email.toLowerCase(),
                 googleId: payload.sub,
                 verified: !!payload.email_verified,
                 emailVerified: !!payload.email_verified,
-            });
-            await user.save();
+            }).save();
         }
 
-        const token = await jwt.sign({ username: user.username }, process.env.SCTY_KEY, {
-            expiresIn: '7d'
-        });
-
-        res.status(200).send({ user, msg: 'Signed in with Google', token: `bearer ${token}` });
+        res.status(200).send({ user, msg: 'Signed in with Google', token: tokens.signAuth(user) });
     } catch (error) {
         console.error('Google auth error:', error);
         res.status(500).send({ error: 'Google sign-in failed' });
@@ -161,93 +168,25 @@ router.post('/google', async (req, res) => {
 });
 
 
-router.get('/current', isAuth(), (request, result) => {
-    result.status(200).send({user: request.user});
-});
-
-
-router.post('/send/add-email', async (req, res) => {
-    try {
-        const { email, username, password } = req.body;
-
-        const search = await User.findOne({ username: username });
-        if (search) {
-            return res.status(400).send({error :'username already exists'});
-        }
-        const emailSearch = await User.findOne({ email: email });
-        if (emailSearch) {
-            return res.status(400).send({error :'email already exists'});
-        }
-
-        const salt = 10;
-        const genSalt = await bcrypt.genSalt(salt);
-        const hashed_password = await bcrypt.hash(password, genSalt);
-
-        let newUser = new User({
-            email: email,
-            username: username,
-            password: hashed_password,
-            verified: false
-        });
-
-        let result = await newUser.save();
-
-        const payload = {
-            userId: result._id,
-            email: email,
-			username: username
-		}
-
-		const token = await jwt.sign(payload, process.env.SCTY_KEY, {
-			expiresIn: '24h'
-		});
-        
-        await sendVerificationEmail(email, username, token);
-
-        const pendingUser = new pending({
-            userId: result._id,
-            email: email,
-            token: token
-        });
-        await pendingUser.save();
-
-        const payloadLogin = {
-			username: username
-		}
-		const tokenLogin = await jwt.sign(payloadLogin, process.env.SCTY_KEY, {
-			expiresIn: '7d'
-		});
-
-        res.status(200).send({ user: result, msg: "user added", token: `bearer ${tokenLogin}` });
-
-    } catch (error) {
-        console.error('Error:', error);
-        res.status(500).send({ error: 'Error' });
-    }
+router.get('/current', isAuth(), (req, res) => {
+    res.status(200).send({ user: req.user });
 });
 
 
 router.get('/confirm/add-email/:token', async (req, res) => {
     try {
-        const decoded = jwt.verify(
-            req.params.token,
-            process.env.SCTY_KEY
-        );
-
-        const user = await User.findById(decoded.userId);
-        const pendingEntry = await pending.findOne({ userId: decoded.userId });
-
-        if (!user || !pendingEntry) {
+        const entry = await consumePendingEmail(req.params.token, PURPOSES.VERIFY_EMAIL);
+        if (!entry) {
             return res.status(400).send({ error: 'Invalid or expired verification link' });
         }
-        
-        await User.findByIdAndUpdate(decoded.userId, { email: pendingEntry.email });
-        await User.findByIdAndUpdate(decoded.userId, { verified: true });
-        await User.findByIdAndUpdate(decoded.userId, { emailVerified: true });
-        await pendingEntry.deleteOne();
 
-        res.redirect(process.env.FRONTLINK + '/profile');
+        const user = await User.findById(entry.userId);
+        if (!user || user.email.toLowerCase() !== entry.email.toLowerCase()) {
+            return res.status(400).send({ error: 'Invalid or expired verification link' });
+        }
 
+        await User.updateOne({ _id: user._id }, { verified: true, emailVerified: true });
+        res.redirect(frontendUrl('/profile'));
     } catch (error) {
         console.error('Error confirming email:', error);
         res.status(500).send({ error: 'Failed to confirm email' });
@@ -255,58 +194,45 @@ router.get('/confirm/add-email/:token', async (req, res) => {
 });
 
 
-router.post("/resend/verification", isAuth(), async (req, res) => {
+router.post('/resend/verification', isAuth(), async (req, res) => {
     try {
-        
-        const payload = {
-            userId: req.user._id,
-            email: req.user.email,
-			username: req.user.username
-		}
-
-		const token = await jwt.sign(payload, process.env.SCTY_KEY, {
-			expiresIn: '24h'
-		});
-
-        await pending.deleteOne({ userId: req.user._id }); 
-        
-        await sendVerificationEmail(req.user.email, req.user.username, token);
-
-        const pendingUser = new pending({
-            userId: req.user._id,
-            email: req.user.email,
-            token: token
-        });
-        await pendingUser.save();
-
-        res.send({ 
-            message: 'Verification email resent successfully' 
-        });
+        if (req.user.verified) {
+            return res.status(400).send({ error: 'Email is already verified' });
+        }
+        await createPendingEmail(req.user, req.user.email, PURPOSES.VERIFY_EMAIL);
+        res.send({ message: 'Verification email resent successfully' });
     } catch (error) {
-        console.error('Error:', error);
-        res.status(500).send({ error: 'Error' });
+        console.error('Error resending verification:', error);
+        res.status(500).send({ error: 'Failed to resend verification email' });
     }
-})
+});
 
 
-router.put('/update-password', isAuth(), async (req, res) => {
+router.put('/update-password', isAuth(), newPasswordRules(), validation, async (req, res) => {
     try {
-        const { oldPassword, newPassword } = req.body;        
+        const { oldPassword, newPassword } = req.body;
 
-        const userId = req.user._id;
-        const user = await User.findById(userId);
+        const user = await User.findById(req.user._id).select('+password');
         if (!user) {
             return res.status(404).send({ error: 'User not found' });
         }
-        const isMatch = await bcrypt.compare(oldPassword, user.password);
-        if (!isMatch) {
-            return res.status(400).send({ error: 'Old password is incorrect' });
+
+        if (user.password) {
+            if (!(await bcrypt.compare(String(oldPassword || ''), user.password))) {
+                return res.status(400).send({ error: 'Current password is incorrect' });
+            }
+        } else {
+            const session = tokens.verify(req.headers.authorization, PURPOSES.AUTH);
+            const signedInRecently = session?.iat && Date.now() / 1000 - session.iat < FIRST_PASSWORD_WINDOW_SECONDS;
+            if (!user.googleId || !signedInRecently) {
+                return res.status(403).send({ error: 'For your security, sign out and sign in with Google again, then set your password within 15 minutes.' });
+            }
         }
-        
-        const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(newPassword, salt);
-        await User.findByIdAndUpdate(userId, { password: hashedPassword });
-        res.status(200).send({ message: 'Password updated successfully' });
+
+        user.password = await bcrypt.hash(newPassword, BCRYPT_ROUNDS);
+        user.passwordChangedAt = new Date();
+        await user.save();
+        res.status(200).send({ message: 'Password updated', user });
     } catch (error) {
         console.error('Error updating password:', error);
         res.status(500).send({ error: 'Failed to update password' });
@@ -314,60 +240,56 @@ router.put('/update-password', isAuth(), async (req, res) => {
 });
 
 
-router.post('/reset-password', async (req, res) => {
+router.post('/reset-password', emailRules('email'), validation, async (req, res) => {
+    const reply = { message: 'If an account exists for that email, a reset link has been sent.' };
     try {
-        const { email } = req.body;
-        const user = await User.findOne({ email });
-        
-        if (!user) {
-            return res.status(404).json({ error: 'User not found' });
+        const user = await findByEmail(req.body.email);
+        if (user) {
+            const token = tokens.sign(
+                PURPOSES.PASSWORD_RESET,
+                { userId: user._id, pwv: tokens.passwordFingerprint(user) },
+                '1h'
+            );
+            await sendPasswordResetEmail(user.email, user.username, token);
         }
-
-        const token = jwt.sign(
-            { userId: user._id },
-            process.env.SCTY_KEY,
-            { expiresIn: '1h' }
-        );
-
-        await sendPasswordResetEmail(
-            email,
-            user.username,
-            token
-        );
-
-        res.send({ 
-            message: 'Password reset email sent successfully' 
-        });
-
+        res.send(reply);
     } catch (error) {
         console.error('Reset password error:', error);
-        res.status(500).json({ error: 'Failed to send reset email' });
+        res.send(reply);
     }
 });
 
 
-router.post('/set-new-password', async (req, res) => {
+async function userForResetToken(token) {
+    const decoded = tokens.verify(token, PURPOSES.PASSWORD_RESET);
+    if (!decoded?.userId) return null;
+    const user = await User.findById(decoded.userId);
+    if (!user || decoded.pwv !== tokens.passwordFingerprint(user)) return null;
+    return user;
+}
+
+router.get('/verify-reset', async (req, res) => {
     try {
-        const { token, newPassword } = req.body;
-        const decoded = jwt.verify(
-            token,
-            process.env.SCTY_KEY
-        );
-        const user = await User.findById(decoded.userId);
+        const user = await userForResetToken(req.query.token);
         if (!user) {
-            return res.status(404).send({ error: 'Invalid or expired reset link' });
+            return res.status(400).send({ error: 'Invalid or expired reset link' });
+        }
+        res.redirect(frontendUrl(`/reset-password-form#token=${encodeURIComponent(req.query.token)}`));
+    } catch (error) {
+        console.error('Verify reset error:', error);
+        res.status(400).send({ error: 'Invalid or expired reset link' });
+    }
+});
+
+
+router.post('/set-new-password', newPasswordRules(), validation, async (req, res) => {
+    try {
+        const user = await userForResetToken(req.body.token);
+        if (!user) {
+            return res.status(400).send({ error: 'Invalid, expired or already used reset link' });
         }
 
-        
-        if (user.passwordChangedAt && decoded.iat * 1000 < user.passwordChangedAt.getTime()) {
-            return res.status(400).send({ error: 'Reset link has already been used' });
-        }
-
-        const salt = 10;
-        const genSalt = await bcrypt.genSalt(salt);
-        const hashed_password = await bcrypt.hash(newPassword, genSalt);
-
-        user.password = hashed_password;
+        user.password = await bcrypt.hash(req.body.newPassword, BCRYPT_ROUNDS);
         user.passwordChangedAt = new Date();
         await user.save();
 
@@ -379,70 +301,35 @@ router.post('/set-new-password', async (req, res) => {
 });
 
 
-router.get('/verify-reset', async (req, res) => {
+router.post('/send/verify-new-email', isAuth(), emailRules('newEmail'), validation, async (req, res) => {
     try {
-        const { token } = req.query;
-
-        const decoded = jwt.verify(
-            token,
-            process.env.SCTY_KEY
-        );
-
-        const user = await User.findById(decoded.userId);
-        
-        if (!user) {
-            return res.status(404).send({ error: 'Invalid or expired reset link' });
+        const { newEmail } = req.body;
+        if (await findByEmail(newEmail)) {
+            return res.status(400).send({ error: 'email already exists' });
         }
 
-        res.redirect(process.env.FRONTLINK + `/reset-password-form?token=${token}`);
-
+        await createPendingEmail(req.user, newEmail, PURPOSES.EMAIL_CHANGE);
+        res.send({ message: 'Verification email sent successfully' });
     } catch (error) {
-        console.error('Verify reset error:', error);
-        res.status(400).send({ error: 'Invalid or expired reset link' });
-    }
-});
-
-
-router.post('/send/verify-new-email', isAuth(), async (req, res) => {
-    try {
-        const {newEmail } = req.body;
-        const emailSearch = await User.findOne({ email: newEmail });
-        if (emailSearch) {
-            return res.send({error :'email already exists'});
-        }
-
-        const payload = {
-            userId: req.user._id,
-            email: newEmail,
-            username: req.user.username
-        }
-        const token = await jwt.sign(payload, process.env.SCTY_KEY, {
-            expiresIn: '24h'
-        });
-
-        await sendConformationNewEmail(newEmail, req.user.username, token);
-
-        res.send({ 
-            message: 'Verification email sent successfully' 
-        });
-    }
-    catch (error) {
-        console.error('Error:', error);
-        res.status(500).send({ error: 'Error' });
+        console.error('Error sending email change link:', error);
+        res.status(500).send({ error: 'Failed to send verification email' });
     }
 });
 
 router.get('/verify-new-email', async (req, res) => {
     try {
-        const { token } = req.query;
-        const decoded = jwt.verify(
-            token,
-            process.env.SCTY_KEY
-        );
-        const id = decoded.userId;
-        await User.findByIdAndUpdate(id, { email: decoded.email });
-        await User.findByIdAndUpdate(id, { emailVerified: true });
-        res.redirect(process.env.FRONTLINK + '/profile');
+        const entry = await consumePendingEmail(req.query.token, PURPOSES.EMAIL_CHANGE);
+        if (!entry) {
+            return res.status(400).send({ error: 'Invalid or expired verification link' });
+        }
+
+        const taken = await findByEmail(entry.email);
+        if (taken && taken._id.toString() !== entry.userId.toString()) {
+            return res.status(400).send({ error: 'email already exists' });
+        }
+
+        await User.updateOne({ _id: entry.userId }, { email: entry.email, emailVerified: true, verified: true });
+        res.redirect(frontendUrl('/profile'));
     } catch (error) {
         console.error('Error confirming new email:', error);
         res.status(500).send({ error: 'Failed to confirm new email' });
@@ -450,147 +337,63 @@ router.get('/verify-new-email', async (req, res) => {
 });
 
 
-router.post('/api-key/generate', isAuth(), async (req, res) => {
-    try {
-        const userId = req.user._id;
-        
-        if (!userId) {
-            return res.status(400).send({ error: 'User ID not found' });
-        }
-
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).send({ error: 'User not found' });
-        }
-
-        const apiKey = generateApiKey();
-        
-        const updatedUser = await User.findByIdAndUpdate(
-            userId, 
-            { apiKey: apiKey },
-            { new: true }
-        );
-
-        res.status(200).send({ 
-            success: true,
-            apiKey: apiKey,
-            message: 'API key generated successfully' 
-        });
-
-    } catch (error) {
-        console.error('Error generating API key:', error);
-        res.status(500).send({ error: 'Failed to generate API key' });
-    }
-});
-
-router.get('/api-key/:userId', isAuth(), async (req, res) => {
-    try {
-        const { userId } = req.params;
-        
-        if (req.user._id.toString() !== userId) {
-            return res.status(403).send({ error: 'Access denied' });
-        }
-        
-        const user = await User.findById(userId).select('apiKey');
-        if (!user) {
-            return res.status(404).send({ error: 'User not found' });
-        }
-
-        res.status(200).send({ 
-            success: true,
-            apiKey: user.apiKey || null 
-        });
-
-    } catch (error) {
-        console.error('Error fetching API key:', error);
-        res.status(500).send({ error: 'Failed to fetch API key' });
-    }
-});
-
-router.delete('/api-key/:userId', isAuth(), async (req, res) => {
-    try {
-        const { userId } = req.params;
-        
-        if (req.user._id.toString() !== userId) {
-            return res.status(403).send({ error: 'Access denied' });
-        }
-        
-        const user = await User.findById(userId);
-        if (!user) {
-            return res.status(404).send({ error: 'User not found' });
-        }
-
-        await User.findByIdAndUpdate(userId, { $unset: { apiKey: 1 } });
-
-        res.status(200).send({ 
-            success: true,
-            message: 'API key revoked successfully' 
-        });
-
-    } catch (error) {
-        console.error('Error revoking API key:', error);
-        res.status(500).send({ error: 'Failed to revoke API key' });
-    }
-});
-
-router.post('/api-key', isAuth(), async (req, res) => {
-    try {
-        const userId = req.user._id;
-        const apiKey = generateApiKey();
-        
-        await User.findByIdAndUpdate(userId, { apiKey: apiKey });
-
-        res.status(200).send({ 
-            success: true,
-            apiKey: apiKey,
-            message: 'API key generated successfully' 
-        });
-
-    } catch (error) {
-        console.error('Error generating API key:', error);
-        res.status(500).send({ error: 'Failed to generate API key' });
-    }
-});
-
-router.get('/api-key', isAuth(), async (req, res) => {
-    try {
-        const userId = req.user._id;
-        
-        const user = await User.findById(userId).select('apiKey');
-        if (!user) {
-            return res.status(404).send({ error: 'User not found' });
-        }
-
-        res.status(200).send({ 
-            success: true,
-            apiKey: user.apiKey || null 
-        });
-
-    } catch (error) {
-        console.error('Error fetching API key:', error);
-        res.status(500).send({ error: 'Failed to fetch API key' });
-    }
-});
-
-router.delete('/api-key', isAuth(), async (req, res) => {
-    try {
-        const userId = req.user._id;
-        
-        await User.findByIdAndUpdate(userId, { $unset: { apiKey: 1 } });
-
-        res.status(200).send({ 
-            success: true,
-            message: 'API key revoked successfully' 
-        });
-
-    } catch (error) {
-        console.error('Error revoking API key:', error);
-        res.status(500).send({ error: 'Failed to revoke API key' });
-    }
-});
-
 function generateApiKey() {
     return 'BO7-' + crypto.randomBytes(32).toString('hex');
 }
+
+function apiKeyPreview(key) {
+    return `${key.slice(0, 8)}…${key.slice(-4)}`;
+}
+
+router.post(['/api-key', '/api-key/generate'], isAuth(), requireVerified, async (req, res) => {
+    try {
+        const apiKey = generateApiKey();
+        const preview = apiKeyPreview(apiKey);
+
+        await User.updateOne(
+            { _id: req.user._id },
+            { $set: { apiKeyHash: tokens.hashApiKey(apiKey), apiKeyPreview: preview }, $unset: { apiKey: 1 } }
+        );
+
+        res.status(200).send({
+            success: true,
+            apiKey,
+            preview,
+            message: 'API key generated successfully. Copy it now — it will not be shown again.',
+        });
+    } catch (error) {
+        console.error('Error generating API key:', error);
+        res.status(500).send({ error: 'Failed to generate API key' });
+    }
+});
+
+router.get(['/api-key', '/api-key/:userId'], isAuth(), async (req, res) => {
+    try {
+        const user = await User.findById(req.user._id).select('apiKey apiKeyHash apiKeyPreview');
+        if (!user) {
+            return res.status(404).send({ error: 'User not found' });
+        }
+
+        const hasKey = !!(user.apiKeyHash || user.apiKey);
+        const preview = user.apiKeyPreview || (user.apiKey ? apiKeyPreview(user.apiKey) : null);
+        res.status(200).send({ success: true, hasKey, preview });
+    } catch (error) {
+        console.error('Error fetching API key:', error);
+        res.status(500).send({ error: 'Failed to fetch API key' });
+    }
+});
+
+router.delete(['/api-key', '/api-key/:userId'], isAuth(), async (req, res) => {
+    try {
+        await User.updateOne(
+            { _id: req.user._id },
+            { $unset: { apiKey: 1, apiKeyHash: 1 }, $set: { apiKeyPreview: null } }
+        );
+        res.status(200).send({ success: true, message: 'API key revoked successfully' });
+    } catch (error) {
+        console.error('Error revoking API key:', error);
+        res.status(500).send({ error: 'Failed to revoke API key' });
+    }
+});
 
 module.exports = router;

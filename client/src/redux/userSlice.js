@@ -62,7 +62,7 @@ export const currentUser = createAsyncThunk("user/current", async (_, { rejectWi
 
 export const GetUserFiles = createAsyncThunk("user/files", async (userId, { rejectWithValue }) => {
   try {
-    const result = await axios.get(link_files + `/all/${userId}`, {
+    const result = await axios.get(link_files + `/all`, {
       headers: { Authorization: getCookie("token") },
     })
     return result.data
@@ -74,7 +74,7 @@ export const GetUserFiles = createAsyncThunk("user/files", async (userId, { reje
 
 export const uploadFile = createAsyncThunk("user/upload", async ({ userId, file }, { rejectWithValue }) => {
   try {
-    const result = await axios.post(link_files + `/upload/${userId}`, file, {
+    const result = await axios.post(link_files + `/upload`, file, {
       headers: {
         "Content-Type": "multipart/form-data",
         Authorization: getCookie("token"),
@@ -89,7 +89,7 @@ export const uploadFile = createAsyncThunk("user/upload", async ({ userId, file 
 
 export const GetUserFolders = createAsyncThunk("user/folders", async (userId, { rejectWithValue }) => {
   try {
-    const result = await axios.get(link_files + `/folders/${userId}`, {
+    const result = await axios.get(link_files + `/folders`, {
       headers: { Authorization: getCookie("token") },
     })
     return result.data
@@ -111,7 +111,7 @@ export const CreateFolder = createAsyncThunk("user/createFolder", async ({ userI
 
 export const DeleteFolder = createAsyncThunk("user/deleteFolder", async ({ folderId, userId }, { rejectWithValue }) => {
   try {
-    const result = await axios.delete(link_files + `/folders/${folderId}/${userId}`, {
+    const result = await axios.delete(link_files + `/folders/${folderId}`, {
       headers: { Authorization: getCookie("token") },
     })
     return result.data
@@ -155,7 +155,7 @@ export const MoveFile = createAsyncThunk("user/moveFile", async ({ fileId, userI
 
 export const DeleteFile = createAsyncThunk("user/delete", async ({ fileId, userId }, { rejectWithValue }) => {
   try {
-    const result = await axios.delete(link_files + `/delete/${fileId}/${userId}`, {
+    const result = await axios.delete(link_files + `/delete/${fileId}`, {
       headers: { Authorization: getCookie("token") },
     })
     return result.data
@@ -165,25 +165,11 @@ export const DeleteFile = createAsyncThunk("user/delete", async ({ fileId, userI
   }
 })
 
-export const inspect = createAsyncThunk("user/inspect", async (fileId, { rejectWithValue }) => {
-  try {
-    const result = await axios.delete(link_files + `/inspect/${fileId}`, {
-      headers: {
-        Authorization: getCookie("token"),
-      },
-    })
-    return result.data
-  } catch (error) {
-    return rejectWithValue(error.response?.data || "Failed to inspect file")
-  }
-})
-
-// Fixed API key related actions
 export const generateApiKey = createAsyncThunk("user/generateApiKey", async (userId, { rejectWithValue }) => {
   try {
     const result = await axios.post(
-      `${link}/api-key/generate`,
-      { userId }, // Send userId in body if needed by backend
+      `${link}/api-key`,
+      null,
       {
         headers: {
           Authorization: getCookie("token"),
@@ -199,7 +185,7 @@ export const generateApiKey = createAsyncThunk("user/generateApiKey", async (use
 
 export const getUserApiKey = createAsyncThunk("user/getUserApiKey", async (userId, { rejectWithValue }) => {
   try {
-    const result = await axios.get(`${link}/api-key/${userId}`, {
+    const result = await axios.get(`${link}/api-key`, {
       headers: {
         Authorization: getCookie("token"),
       },
@@ -211,9 +197,22 @@ export const getUserApiKey = createAsyncThunk("user/getUserApiKey", async (userI
   }
 })
 
+export const revokeApiKey = createAsyncThunk("user/revokeApiKey", async (_, { rejectWithValue }) => {
+  try {
+    const result = await axios.delete(`${link}/api-key`, {
+      headers: {
+        Authorization: getCookie("token"),
+      },
+    })
+    return result.data
+  } catch (error) {
+    return rejectWithValue(error.response?.data || "Failed to revoke API key")
+  }
+})
+
 export const getStorageUsage = createAsyncThunk("user/getStorageUsage", async (userId, { rejectWithValue }) => {
   try {
-    const result = await axios.get(`${link_files}/storage/${userId}`, {
+    const result = await axios.get(`${link_files}/storage`, {
       headers: {
         Authorization: getCookie("token"),
       },
@@ -315,6 +314,8 @@ const initialState = {
   files: null,
   folders: [],
   apiKey: null,
+  apiKeyPreview: null,
+  hasApiKey: false,
   storageUsage: {
     used: 0,
     total: 5368709120,
@@ -335,6 +336,8 @@ export const userSlice = createSlice({
       state.folders = []
       state.user = null
       state.apiKey = null
+      state.apiKeyPreview = null
+      state.hasApiKey = false
       state.storageUsage = {
         used: 0,
         total: 5368709120,
@@ -343,6 +346,9 @@ export const userSlice = createSlice({
       state.error = ""
       state.status = null
       state.loading = false
+    },
+    clearFreshApiKey(state) {
+      state.apiKey = null
     },
     clearError(state) {
       state.error = ""
@@ -466,6 +472,8 @@ export const userSlice = createSlice({
       })
       .addCase(generateApiKey.fulfilled, (state, action) => {
         state.apiKey = action.payload.apiKey
+        state.apiKeyPreview = action.payload.preview || null
+        state.hasApiKey = true
         state.loading = false
         state.status = "succeeded"
       })
@@ -482,7 +490,8 @@ export const userSlice = createSlice({
         state.error = ""
       })
       .addCase(getUserApiKey.fulfilled, (state, action) => {
-        state.apiKey = action.payload.apiKey
+        state.apiKeyPreview = action.payload.preview || null
+        state.hasApiKey = !!action.payload.hasKey
         state.loading = false
       })
       .addCase(getUserApiKey.rejected, (state, action) => {
@@ -527,18 +536,22 @@ export const userSlice = createSlice({
 
       .addCase(updatePassword.pending, (state) => {
         state.status = "pending"
-        state.error = ""
         state.loading = true
       })
       .addCase(updatePassword.fulfilled, (state, action) => {
         state.status = "succeeded"
-        state.error = action.payload?.message || "Password updated successfully"
+        if (action.payload?.user) state.user = action.payload.user
         state.loading = false
       })
-      .addCase(updatePassword.rejected, (state, action) => {
+      .addCase(updatePassword.rejected, (state) => {
         state.status = "failed"
-        state.error = action.payload?.error || "Failed to update password"
         state.loading = false
+      })
+
+      .addCase(revokeApiKey.fulfilled, (state) => {
+        state.apiKey = null
+        state.apiKeyPreview = null
+        state.hasApiKey = false
       })
 
 
@@ -579,16 +592,14 @@ export const userSlice = createSlice({
 
       .addCase(sendVerifyNewEmail.pending, (state) => {
         state.status = "pending"
-        state.error = ""
         state.loading = true
       })
       .addCase(sendVerifyNewEmail.fulfilled, (state, action) => {
         state.status = "succeeded"
         state.loading = false
       })
-      .addCase(sendVerifyNewEmail.rejected, (state, action) => {
+      .addCase(sendVerifyNewEmail.rejected, (state) => {
         state.status = "failed"
-        state.error = action.payload?.error || "Failed to send verification email"
         state.loading = false
       })
 
@@ -664,6 +675,6 @@ function setCookie(cname, cvalue, exdays) {
   document.cookie = cname + "=" + cvalue + ";" + expires + ";path=/"
 }
 
-export const { logout, clearError, setLoading } = userSlice.actions
+export const { logout, clearError, setLoading, clearFreshApiKey } = userSlice.actions
 
 export default userSlice.reducer

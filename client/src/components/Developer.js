@@ -1,783 +1,423 @@
 import { useEffect, useState } from "react"
 import { useDispatch, useSelector } from "react-redux"
-import { generateApiKey, getUserApiKey, getStorageUsage, clearError } from "../redux/userSlice"
-import NavBar from "./NavBar"
-import Swal from "sweetalert2"
-import "./dev.css"
+import { useNavigate } from "react-router-dom"
+import { Highlight, themes } from "prism-react-renderer"
+import {
+  generateApiKey,
+  getUserApiKey,
+  getStorageUsage,
+  revokeApiKey,
+  clearFreshApiKey,
+  logout,
+} from "../redux/userSlice"
+import SettingsModal from "./SettingsModal"
+import Icon from "./profile/Icon"
+import Toasts, { useToasts } from "./profile/Toasts"
+import { confirmDialog } from "./profile/confirm"
+import { formatBytes, readPref, writePref } from "./profile/fileUtils"
+import { COMMON_ERRORS, ENDPOINTS, LANGUAGES, LIMITS, codeSample } from "./developer/apiDocs"
+import "../Profile.css"
+import "./Developer.css"
 
-import { Highlight } from 'prism-react-renderer';
+const BASE_URL = (process.env.REACT_APP_LINK_FILES || "").replace(/\/+$/, "")
+
+function CodeBlock({ code, language, onCopy, label }) {
+  return (
+    <div className="dv-code">
+      <div className="dv-code-bar">
+        <span>{label}</span>
+        <button className="dv-copy" onClick={() => onCopy(code)} aria-label={`Copy ${label}`}>
+          <Icon name="copy" size={14} />
+          Copy
+        </button>
+      </div>
+      <Highlight code={code} language={language} theme={themes.oneDark}>
+        {({ className, tokens, getLineProps, getTokenProps }) => (
+          <pre className={`dv-pre ${className}`} tabIndex={0}>
+            {tokens.map((line, i) => (
+              <div key={i} {...getLineProps({ line })}>
+                {line.map((token, key) => (
+                  <span key={key} {...getTokenProps({ token })} />
+                ))}
+              </div>
+            ))}
+          </pre>
+        )}
+      </Highlight>
+    </div>
+  )
+}
+
+function MethodBadge({ method }) {
+  return <span className={`dv-method is-${method.toLowerCase()}`}>{method}</span>
+}
 
 function Developer() {
   const dispatch = useDispatch()
-  const { user, apiKey, storageUsage, loading, error } = useSelector((state) => state.user)
-  
-  const [localApiKey, setLocalApiKey] = useState("")
-  const [localStorageUsage, setLocalStorageUsage] = useState({ used: 0, total: 1073741824, fileCount: 0 })
-  const [localLoading, setLocalLoading] = useState(true)
+  const navigate = useNavigate()
+  const user = useSelector((state) => state.user.user)
+  const apiKey = useSelector((state) => state.user.apiKey)
+  const apiKeyPreview = useSelector((state) => state.user.apiKeyPreview)
+  const hasApiKey = useSelector((state) => state.user.hasApiKey)
+  const storageUsage = useSelector((state) => state.user.storageUsage)
+
+  const [keyLoading, setKeyLoading] = useState(true)
+  const [keyBusy, setKeyBusy] = useState(false)
   const [keyVisible, setKeyVisible] = useState(false)
-  const [selectedEndpoint, setSelectedEndpoint] = useState("upload")
-  const [copySuccess, setCopySuccess] = useState(null)
+  const [endpointId, setEndpointId] = useState(() => {
+    const fromHash = window.location.hash.slice(1)
+    return ENDPOINTS.some((e) => e.id === fromHash) ? fromHash : "upload"
+  })
+  const [language, setLanguage] = useState(() => readPref("lang", "curl", LANGUAGES.map((l) => l.id)))
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const { toasts, push: toast, dismiss } = useToasts()
+
+  const endpoint = ENDPOINTS.find((e) => e.id === endpointId)
+  const lang = LANGUAGES.find((l) => l.id === language)
+  const verified = user?.verified !== false
+  const keyExists = hasApiKey || !!apiKey
 
   useEffect(() => {
-    if (user?._id) {
-      fetchDeveloperData()
+    if (!user?._id) return
+    setKeyLoading(true)
+    Promise.all([dispatch(getUserApiKey()), dispatch(getStorageUsage())]).finally(() => setKeyLoading(false))
+  }, [user?._id, dispatch])
+
+  useEffect(() => writePref("lang", language), [language])
+
+  useEffect(() => {
+    window.history.replaceState(null, "", `#${endpointId}`)
+  }, [endpointId])
+
+  useEffect(() => {
+    const onHash = () => {
+      const id = window.location.hash.slice(1)
+      if (ENDPOINTS.some((e) => e.id === id)) setEndpointId(id)
     }
-  }, [user])
+    window.addEventListener("hashchange", onHash)
+    return () => window.removeEventListener("hashchange", onHash)
+  }, [])
 
-  useEffect(() => {
-    if (apiKey !== null) {
-      setLocalApiKey(apiKey || "")
-    }
-  }, [apiKey])
-
-  useEffect(() => {
-    if (storageUsage) {
-      setLocalStorageUsage(storageUsage)
-    }
-  }, [storageUsage])
-
-  useEffect(() => {
-    setLocalLoading(loading)
-  }, [loading])
-
-  useEffect(() => {
-    if (copySuccess) {
-      const timer = setTimeout(() => {
-        setCopySuccess(null)
-      }, 2000)
-      return () => clearTimeout(timer)
-    }
-  }, [copySuccess])
-
-  useEffect(() => {
-    if (error) {
-      Swal.fire({
-        title: "Error",
-        text: error,
-        icon: "error",
-        confirmButtonColor: "var(--accent-primary)",
-        background: "var(--bg-secondary)",
-        color: "var(--text-primary)",
-      }).then(() => {
-        dispatch(clearError())
-      })
-    }
-  }, [error, dispatch])
-
-  const fetchDeveloperData = async () => {
+  const copy = async (text, message = "Copied") => {
     try {
-      setLocalLoading(true)
-      
-      const keyPromise = dispatch(getUserApiKey(user._id))
-      const usagePromise = dispatch(getStorageUsage(user._id))
-      
-      await Promise.all([keyPromise, usagePromise])
-      
-    } catch (error) {
-      console.error("Error fetching developer data:", error)
-      Swal.fire({
-        title: "Error",
-        text: "Failed to load developer data. Please try again later.",
-        icon: "error",
-        confirmButtonColor: "var(--accent-primary)",
-        background: "var(--bg-secondary)",
-        color: "var(--text-primary)",
-      })
-    } finally {
-      setLocalLoading(false)
+      await navigator.clipboard.writeText(text)
+      toast(message)
+    } catch {
+      toast("Couldn't copy. Select the text and copy it manually.", { tone: "error" })
     }
   }
 
-  const handleGenerateApiKey = async () => {
-    try {
-      const result = await Swal.fire({
-        title: "Generate New API Key?",
-        text: "This will invalidate your current API key if you have one.",
-        icon: "warning",
-        showCancelButton: true,
-        confirmButtonColor: "var(--accent-primary)",
-        cancelButtonColor: "var(--text-muted)",
-        confirmButtonText: "Generate",
-        cancelButtonText: "Cancel",
-        background: "var(--bg-secondary)",
-        color: "var(--text-primary)",
+  const createKey = async () => {
+    if (keyExists) {
+      const ok = await confirmDialog({
+        title: "Replace your API key?",
+        text: "Your current key stops working right away. Apps using it get 401 errors until you update them.",
+        confirmLabel: "Replace key",
       })
-
-      if (result.isConfirmed) {
-        const actionResult = await dispatch(generateApiKey(user._id))
-        
-        if (generateApiKey.fulfilled.match(actionResult)) {
-          setKeyVisible(true)
-          Swal.fire({
-            title: "Success!",
-            text: "New API key generated successfully.",
-            icon: "success",
-            confirmButtonColor: "var(--accent-primary)",
-            background: "var(--bg-secondary)",
-            color: "var(--text-primary)",
-          })
-        }
-      }
-    } catch (error) {
-      console.error("Error generating API key:", error)
-      Swal.fire({
-        title: "Error!",
-        text: "Failed to generate API key.",
-        icon: "error",
-        confirmButtonColor: "var(--accent-primary)",
-        background: "var(--bg-secondary)",
-        color: "var(--text-primary)",
-      })
+      if (!ok) return
+    }
+    setKeyBusy(true)
+    const result = await dispatch(generateApiKey())
+    setKeyBusy(false)
+    if (generateApiKey.fulfilled.match(result)) {
+      setKeyVisible(true)
+      toast(keyExists ? "New key created. The old one no longer works." : "API key created")
+    } else {
+      toast(result.payload?.error || "Couldn't create a key. Try again.", { tone: "error" })
     }
   }
 
-  const handleCopyApiKey = () => {
-    if (localApiKey) {
-      navigator.clipboard.writeText(localApiKey)
-      setCopySuccess("apiKey")
-      Swal.fire({
-        title: "Copied!",
-        text: "API key copied to clipboard",
-        icon: "success",
-        timer: 1500,
-        showConfirmButton: false,
-        background: "var(--bg-secondary)",
-        color: "var(--text-primary)",
-      })
-    }
-  }
-
-  const handleCopyCode = (code, type) => {
-    navigator.clipboard.writeText(code)
-    setCopySuccess(type)
-    Swal.fire({
-      title: "Copied!",
-      text: "Code copied to clipboard",
-      icon: "success",
-      timer: 1000,
-      showConfirmButton: false,
-      background: "var(--bg-secondary)",
-      color: "var(--text-primary)",
+  const removeKey = async () => {
+    const ok = await confirmDialog({
+      title: "Revoke your API key?",
+      text: "Requests using it fail immediately. You can create a new key at any time.",
+      confirmLabel: "Revoke key",
     })
+    if (!ok) return
+    setKeyBusy(true)
+    const result = await dispatch(revokeApiKey())
+    setKeyBusy(false)
+    if (revokeApiKey.fulfilled.match(result)) toast("API key revoked")
+    else toast("Couldn't revoke the key. Try again.", { tone: "error" })
   }
 
-  const formatBytes = (bytes) => {
-    if (bytes === 0) return "0 Bytes"
-    const k = 1024
-    const sizes = ["Bytes", "KB", "MB", "GB"]
-    const i = Math.floor(Math.log(bytes) / Math.log(k))
-    return Number.parseFloat((bytes / Math.pow(k, i)).toFixed(2)) + " " + sizes[i]
+  const handleLogout = () => {
+    dispatch(logout())
+    navigate("/login")
   }
 
-  const usagePercentage = (localStorageUsage.used / localStorageUsage.total) * 100
-  const usageColor = usagePercentage > 90 ? "var(--danger)" : usagePercentage > 70 ? "var(--warning)" : "var(--success)"
+  const used = storageUsage?.used || 0
+  const total = storageUsage?.total || 0
+  const pct = total ? Math.min(100, (used / total) * 100) : 0
+  const sample = codeSample(endpoint, language, BASE_URL, apiKey)
+  const errors = [...endpoint.errors, ...COMMON_ERRORS].sort((a, b) => a.status - b.status)
 
-  const endpoints = {
-    upload: {
-      method: "POST",
-      path: "/api/upload",
-      description: "Upload a file to your storage. Optionally pass private=true to make the file private (default: false — public).",
-      examples: {
-        curl: `curl -X POST \\
-    -H "Authorization: Bearer YOUR_API_KEY" \\
-    -F "file=@/path/to/your/file.txt" \\
-    -F "private=true" \\
-    ${process.env.REACT_APP_LINK_FILES}/api/upload`,
-        python: `import requests
+  const renderKey = () => {
+    if (keyLoading) {
+      return (
+        <div className="dv-key-body" aria-busy="true">
+          <span className="pf-skel dv-skel-line" />
+          <span className="pf-skel dv-skel-short" />
+        </div>
+      )
+    }
 
-url = "${process.env.REACT_APP_LINK_FILES}/api/upload"
-headers = {"Authorization": "Bearer YOUR_API_KEY"}
-files = {"file": open("/path/to/your/file.txt", "rb")}
-data = {"private": "true"}  # omit or set "false" for public
-
-response = requests.post(url, headers=headers, files=files, data=data)
-print(response.json())`,
-        javascript_fetch: `const formData = new FormData();
-formData.append("file", fileInput.files[0]);
-formData.append("private", "true"); // omit or "false" for public
-
-fetch("${process.env.REACT_APP_LINK_FILES}/api/upload", {
-  method: "POST",
-  headers: {
-    "Authorization": "Bearer YOUR_API_KEY"
-  },
-  body: formData
-})
-  .then(response => response.json())
-  .then(data => console.log(data))
-  .catch(error => console.error("Error:", error));`,
-        javascript_axios: `import axios from 'axios';
-
-const formData = new FormData();
-formData.append('file', fileInput.files[0]);
-formData.append('private', 'true'); // omit or 'false' for public
-
-axios.post("${process.env.REACT_APP_LINK_FILES}/api/upload", formData, {
-  headers: {
-    'Authorization': 'Bearer YOUR_API_KEY',
-    'Content-Type': 'multipart/form-data'
-  }
-})
-  .then(response => console.log(response.data))
-  .catch(error => console.error('Error:', error));`,
-        typescript: `import axios from 'axios';
-
-const formData = new FormData();
-formData.append('file', (document.getElementById('fileInput') as HTMLInputElement).files![0]);
-formData.append('private', 'true'); // omit or 'false' for public
-
-axios.post("${process.env.REACT_APP_LINK_FILES}/api/upload", formData, {
-  headers: {
-    'Authorization': 'Bearer YOUR_API_KEY',
-    'Content-Type': 'multipart/form-data'
-  }
-})
-  .then(response => console.log(response.data))
-  .catch(error => console.error('Error:', error));`
-      },
-      response: `{
-  "success": true,
-  "fileId": "507f1f77bcf86cd799439011",
-  "filename": "example.txt",
-  "size": "1.2 KB",
-  "isPublic": false,
-  "uploadDate": "2024-01-15T10:30:00.000Z"
-}`
-    },
-    list: {
-      method: "GET",
-      path: "/api/files",
-      description: "Get a list of all your uploaded files",
-      examples: {
-        curl: `curl -X GET \\
-    -H "Authorization: Bearer YOUR_API_KEY" \\
-    ${process.env.REACT_APP_LINK_FILES}/api/files`,
-        python: `import requests
-  
-  url = "${process.env.REACT_APP_LINK_FILES}/api/files"
-  headers = {"Authorization": "Bearer YOUR_API_KEY"}
-  
-  response = requests.get(url, headers=headers)
-  print(response.json())`,
-        javascript_fetch: `fetch("${process.env.REACT_APP_LINK_FILES}/api/files", {
-    headers: {
-      "Authorization": "Bearer YOUR_API_KEY"
-    }
-  })
-  .then(response => response.json())
-  .then(data => console.log(data))
-  .catch(error => console.error("Error:", error));`,
-        javascript_axios: `import axios from 'axios';
-  
-  axios.get("${process.env.REACT_APP_LINK_FILES}/api/files", {
-    headers: {
-      'Authorization': 'Bearer YOUR_API_KEY'
-    }
-  })
-  .then(response => console.log(response.data))
-  .catch(error => console.error('Error:', error));`,
-        typescript: `import axios from 'axios';
-  
-  axios.get("${process.env.REACT_APP_LINK_FILES}/api/files", {
-    headers: {
-      'Authorization': 'Bearer YOUR_API_KEY'
-    }
-  })
-  .then(response => console.log(response.data))
-  .catch(error => console.error('Error:', error));`
-      },
-      response: `{
-  "success": true,
-  "files": [
-    {
-      "id": "507f1f77bcf86cd799439011",
-      "filename": "example.txt",
-      "size": "1.2 KB",
-      "uploadDate": "2024-01-15T10:30:00.000Z",
-      "isPublic": false
-    }
-  ],
-  "count": 1
-}`
-    },
-    download: {
-      method: "GET",
-      path: "/api/files/:fileId",
-      description: "Download a specific file by its ID",
-      examples: {
-        curl: `curl -X GET \\
-    -H "Authorization: Bearer YOUR_API_KEY" \\
-    -O \\
-    ${process.env.REACT_APP_LINK_FILES}/api/files/FILE_ID`,
-        python: `import requests
-  
-  file_id = "FILE_ID"
-  url = f"${process.env.REACT_APP_LINK_FILES}/api/files/{file_id}"
-  headers = {"Authorization": "Bearer YOUR_API_KEY"}
-  
-  response = requests.get(url, headers=headers, stream=True)
-  
-  with open("downloaded_file", "wb") as f:
-      for chunk in response.iter_content(chunk_size=8192):
-          f.write(chunk)`,
-        javascript_fetch: `const fileId = 'FILE_ID';
-  fetch(\`${process.env.REACT_APP_LINK_FILES}/api/files/\${fileId}\`, {
-    headers: {
-      "Authorization": "Bearer YOUR_API_KEY"
-    }
-  })
-  .then(response => response.blob())
-  .then(blob => {
-    const url = window.URL.createObjectURL(blob);
-    const a = document.createElement('a');
-    a.href = url;
-    a.download = 'filename';
-    a.click();
-  });`,
-        javascript_axios: `import axios from 'axios';
-  
-  const fileId = 'FILE_ID';
-  axios.get(\`${process.env.REACT_APP_LINK_FILES}/api/files/\${fileId}\`, {
-    headers: {
-      'Authorization': 'Bearer YOUR_API_KEY'
-    },
-    responseType: 'blob'
-  })
-  .then(response => {
-    const url = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', 'filename');
-    document.body.appendChild(link);
-    link.click();
-  });`,
-        typescript: `import axios from 'axios';
-  
-  const fileId: string = 'FILE_ID';
-  axios.get<string>( \`${process.env.REACT_APP_LINK_FILES}/api/files/\${fileId}\`, {
-    headers: {
-      'Authorization': 'Bearer YOUR_API_KEY'
-    },
-    responseType: 'blob'
-  })
-  .then(response => {
-    const url = window.URL.createObjectURL(new Blob([response.data]));
-    const link = document.createElement('a');
-    link.href = url;
-    link.setAttribute('download', 'filename');
-    document.body.appendChild(link);
-    link.click();
-  });`
-      },
-      response: "Returns the file content as binary data"
-    },
-    delete: {
-      method: "DELETE",
-      path: "/api/files/:fileId",
-      description: "Delete a specific file by its ID",
-      examples: {
-        curl: `curl -X DELETE \\
-    -H "Authorization: Bearer YOUR_API_KEY" \\
-    ${process.env.REACT_APP_LINK_FILES}/api/files/FILE_ID`,
-        python: `import requests
-  
-  file_id = "FILE_ID"
-  url = f"${process.env.REACT_APP_LINK_FILES}/api/files/{file_id}"
-  headers = {"Authorization": "Bearer YOUR_API_KEY"}
-  
-  response = requests.delete(url, headers=headers)
-  print(response.json())`,
-        javascript_fetch: `const fileId = 'FILE_ID';
-  fetch(\`${process.env.REACT_APP_LINK_FILES}/api/files/\${fileId}\`, {
-    method: 'DELETE',
-    headers: {
-      "Authorization": "Bearer YOUR_API_KEY"
-    }
-  })
-  .then(response => response.json())
-  .then(data => console.log(data))
-  .catch(error => console.error("Error:", error));`,
-        javascript_axios: `import axios from 'axios';
-  
-  const fileId = 'FILE_ID';
-  axios.delete(\`${process.env.REACT_APP_LINK_FILES}/api/files/\${fileId}\`, {
-    headers: {
-      'Authorization': 'Bearer YOUR_API_KEY'
-    }
-  })
-  .then(response => console.log(response.data))
-  .catch(error => console.error('Error:', error));`,
-        typescript: `import axios from 'axios';
-  
-  const fileId: string = 'FILE_ID';
-  axios.delete<string>( \`${process.env.REACT_APP_LINK_FILES}/api/files/\${fileId}\`, {
-    headers: {
-      'Authorization': 'Bearer YOUR_API_KEY'
-    }
-  })
-  .then(response => console.log(response.data))
-  .catch(error => console.error('Error:', error));`
-      },
-      response: `{
-    "success": true,
-    "message": "File deleted successfully"
-  }`
-    },
-    storage: {
-      method: "GET",
-      path: "/api/storage",
-      description: "Get your current storage usage statistics",
-      examples: {
-        curl: `curl -X GET \\
-    -H "Authorization: Bearer YOUR_API_KEY" \\
-    ${process.env.REACT_APP_LINK_FILES}/api/storage`,
-        python: `import requests
-  
-  url = "${process.env.REACT_APP_LINK_FILES}/api/storage"
-  headers = {"Authorization": "Bearer YOUR_API_KEY"}
-  
-  response = requests.get(url, headers=headers)
-  print(response.json())`,
-        javascript_fetch: `fetch("${process.env.REACT_APP_LINK_FILES}/api/storage", {
-    headers: {
-      "Authorization": "Bearer YOUR_API_KEY"
-    }
-  })
-  .then(response => response.json())
-  .then(data => console.log(data))
-  .catch(error => console.error("Error:", error));`,
-        javascript_axios: `import axios from 'axios';
-  
-  axios.get("${process.env.REACT_APP_LINK_FILES}/api/storage", {
-    headers: {
-      'Authorization': 'Bearer YOUR_API_KEY'
-    }
-  })
-  .then(response => console.log(response.data))
-  .catch(error => console.error('Error:', error));`,
-        typescript: `import axios from 'axios';
-  
-  interface StorageUsage {
-    used: number;
-    total: number;
-    fileCount: number;
-    usagePercentage: number;
-  }
-  
-  axios.get<StorageUsage>("${process.env.REACT_APP_LINK_FILES}/api/storage", {
-    headers: {
-      'Authorization': 'Bearer YOUR_API_KEY'
-    }
-  })
-  .then(response => console.log(response.data))
-  .catch(error => console.error('Error:', error));`
-      },
-      response: `{
-    "used": 1234567,
-    "total": 1073741824,
-    "fileCount": 5,
-    "usagePercentage": 0.11
-  }`
-    }
-  };
-
-  const getMethodColor = (method) => {
-    switch (method) {
-      case "GET":
-        return "var(--success)"
-      case "POST":
-        return "#3b82f6"
-      case "DELETE":
-        return "var(--danger)"
-      default:
-        return "var(--text-muted)"
-    }
-  }
-
-  const [selectedLanguage, setSelectedLanguage] = useState("curl");
-
-
-  if (localLoading) {
-    return (
-      <div className="developer-dashboard">
-        <NavBar />
-        <div className="main-content">
-          <div className="loading-container">
-            <div className="spinner"></div>
-            <p className="loading-text">Loading developer dashboard...</p>
+    if (!keyExists) {
+      return (
+        <div className="dv-key-body">
+          <p className="dv-muted">
+            {verified
+              ? "Create a key to call the API from your scripts and apps. Keep it secret: anyone with it can manage your files."
+              : "Confirm your email address before creating an API key."}
+          </p>
+          <div className="dv-key-actions">
+            <button className="pf-btn pf-btn--primary" onClick={createKey} disabled={keyBusy || !verified}>
+              {keyBusy ? <span className="pf-spin st-spin" /> : <Icon name="key" size={15} />}
+              Create API key
+            </button>
           </div>
+        </div>
+      )
+    }
+
+    if (apiKey) {
+      return (
+        <div className="dv-key-body">
+          <div className="dv-fresh" role="status">
+            <Icon name="alert" size={16} />
+            <span>Copy this key now. For your security it won't be shown again.</span>
+          </div>
+          <div className="dv-key-field">
+            <input
+              className="dv-key-input"
+              type={keyVisible ? "text" : "password"}
+              value={apiKey}
+              readOnly
+              onFocus={(e) => e.target.select()}
+              aria-label="Your new API key"
+              spellCheck={false}
+            />
+            <button className="pf-icon-btn" onClick={() => setKeyVisible((v) => !v)} aria-label={keyVisible ? "Hide key" : "Show key"} aria-pressed={keyVisible}>
+              <Icon name={keyVisible ? "eyeOff" : "eye"} size={16} />
+            </button>
+          </div>
+          <div className="dv-key-actions">
+            <button className="pf-btn pf-btn--primary" onClick={() => copy(apiKey, "API key copied")}>
+              <Icon name="copy" size={15} />
+              Copy key
+            </button>
+            <button className="pf-btn pf-btn--ghost" onClick={() => dispatch(clearFreshApiKey())}>
+              I've saved it
+            </button>
+          </div>
+          <p className="dv-muted dv-small">The examples below use this key until you leave the page.</p>
+        </div>
+      )
+    }
+
+    return (
+      <div className="dv-key-body">
+        <div className="dv-key-field is-static">
+          <code className="dv-key-preview">{apiKeyPreview || "BO7-••••••••"}</code>
+          <span className="pf-chip is-public"><Icon name="check" size={12} />Active</span>
+        </div>
+        <p className="dv-muted dv-small">Only the start and end of the key are shown. Lost it? Replace it with a new one.</p>
+        <div className="dv-key-actions">
+          <button className="pf-btn pf-btn--ghost" onClick={createKey} disabled={keyBusy || !verified}>
+            {keyBusy ? <span className="pf-spin st-spin" /> : <Icon name="refresh" size={15} />}
+            Replace key
+          </button>
+          <button className="pf-btn pf-btn--danger-ghost" onClick={removeKey} disabled={keyBusy}>
+            <Icon name="trash" size={15} />
+            Revoke
+          </button>
         </div>
       </div>
     )
   }
 
   return (
-    <div className="developer-dashboard">
-      <NavBar />
-      <div className="main-content">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-primary">Developer Dashboard</h1>
-          <p className="text-secondary">Manage your API access and monitor your storage usage</p>
+    <div className="pf-app dv-app">
+      <header className="dv-top">
+        <div className="dv-top-inner">
+          <button className="pf-brand" onClick={() => navigate("/profile")}>
+            <span className="pf-brand-mark"><Icon name="folder" size={17} /></span>
+            <span className="dv-brand-text">Savage Files</span>
+          </button>
+          <button className="dv-back" onClick={() => navigate("/profile")}>
+            <Icon name="arrowLeft" size={15} />
+            My files
+          </button>
+          <div className="dv-top-user">
+            <button className="pf-icon-btn" onClick={() => setSettingsOpen(true)} title="Account settings" aria-label="Account settings">
+              <Icon name="settings" />
+            </button>
+            <span className="pf-avatar" title={user?.email} aria-hidden="true">{user?.username?.charAt(0).toUpperCase() || "U"}</span>
+            <button className="pf-icon-btn pf-icon-btn--danger" onClick={handleLogout} title="Sign out" aria-label="Sign out">
+              <Icon name="logout" />
+            </button>
+          </div>
+        </div>
+      </header>
+
+      <main className="dv-main">
+        <div className="dv-intro">
+          <h1>Developer API</h1>
+          <p>Upload, list, download and delete your files from scripts and apps, using the same storage as your drive.</p>
+          <div className="dv-base">
+            <span className="dv-base-label">Base URL</span>
+            <code>{BASE_URL}</code>
+            <button className="pf-icon-btn" onClick={() => copy(BASE_URL, "Base URL copied")} aria-label="Copy base URL" title="Copy">
+              <Icon name="copy" size={15} />
+            </button>
+          </div>
         </div>
 
-        <div className="grid">
-          <div className="card">
-            <div className="p-6">
-              <div className="card-header">
-                <h2 className="card-title">API Key</h2>
+        <div className="dv-overview">
+          <section className={`dv-panel dv-key ${apiKey ? "is-fresh" : ""}`} aria-labelledby="dv-key-title">
+            <div className="dv-panel-head">
+              <span className="dv-panel-icon"><Icon name="key" size={17} /></span>
+              <div>
+                <h2 id="dv-key-title">API key</h2>
+                <p>Send it as <code>Authorization: Bearer &lt;key&gt;</code></p>
               </div>
+            </div>
+            {renderKey()}
+          </section>
 
-              {localApiKey ? (
-                <div className="space-y-4">
-                  <div className="api-key-input-group">
-                    <input
-                      type={keyVisible ? "text" : "password"}
-                      value={localApiKey}
-                      readOnly
-                      className="api-key-input"
-                      aria-label="Your API key"
-                    />
-                    <button
-                      onClick={() => setKeyVisible(!keyVisible)}
-                      className="toggle-visibility"
-                      aria-label={keyVisible ? "Hide API key" : "Show API key"}
-                      title={keyVisible ? "Hide API key" : "Show API key"}
-                    >
-                      {keyVisible ? "🙈" : "👁️"}
-                    </button>
+          <section className="dv-panel" aria-labelledby="dv-usage-title">
+            <div className="dv-panel-head">
+              <span className="dv-panel-icon"><Icon name="shield" size={17} /></span>
+              <div>
+                <h2 id="dv-usage-title">Usage and limits</h2>
+                <p>Shared with files you upload on the web.</p>
+              </div>
+            </div>
+            <div className="dv-usage">
+              <div className="dv-usage-numbers">
+                <span className="dv-usage-big pf-num">{formatBytes(used)}</span>
+                <span className="dv-muted pf-num">of {formatBytes(total)}, {storageUsage?.fileCount || 0} {storageUsage?.fileCount === 1 ? "file" : "files"}</span>
+              </div>
+              <div className={`pf-meter ${pct >= 95 ? "is-danger" : pct >= 80 ? "is-warning" : ""}`} role="progressbar" aria-valuenow={Math.round(pct)} aria-valuemin={0} aria-valuemax={100} aria-label="Storage used">
+                <span style={{ width: `${Math.max(pct, used ? 1.5 : 0)}%` }} />
+              </div>
+              <dl className="dv-limits">
+                {LIMITS.map((l) => (
+                  <div key={l.label}>
+                    <dt>{l.label}</dt>
+                    <dd className="pf-num">{l.value}</dd>
                   </div>
-                  <div className="api-key-actions">
-                    <button onClick={handleCopyApiKey} className="action-button" aria-label="Copy API key to clipboard">
-                      <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
-                      </svg>
-                      {copySuccess === "apiKey" ? "Copied!" : "Copy"}
-                    </button>
-                    <button
-                      onClick={handleGenerateApiKey}
-                      className="regenerate-button"
-                      aria-label="Generate new API key"
-                      disabled={loading}
-                    >
-                      <svg className="w-4 h-4 mr-1" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M17.65 6.35C16.2 4.9 14.21 4 12 4c-4.42 0-7.99 3.58-7.99 8s3.57 8 7.99 8c3.73 0 6.84-2.55 7.73-6h-2.08c-.82 2.33-3.04 4-5.65 4-3.31 0-6-2.69-6-6s2.69-6 6-6c1.66 0 3.14.69 4.22 1.78L13 11h7V4l-2.35 2.35z" />
-                      </svg>
-                      {loading ? "Generating..." : "Regenerate"}
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="api-key-section">
-                  <div className="api-key-empty">
-                    <div className="api-key-icon-large">
-                      <svg className="w-8 h-8 text-accent-primary" fill="currentColor" viewBox="0 0 24 24">
-                        <path d="M7 14c-1.66 0-3 1.34-3 3 0 1.31.84 2.41 2 2.83V22h2v-2.17c1.16-.42 2-1.52 2-2.83 0-1.66-1.34-3-3-3zm0 4c-.55 0-1-.45-1-1s.45-1 1-1 1 .45 1 1-.45 1-1 1zm7-6c1.66 0 3-1.34 3-3V5c0-1.66-1.34-3-3-3s-3 1.34-3 3v4c0 1.66 1.34 3 3 3zm-1-7c0-.55.45-1 1-1s1 .45 1 1v4c0 .55-.45 1-1 1s-1-.45-1-1V5z" />
-                      </svg>
-                    </div>
-                    <p className="api-key-empty-text">No API key generated yet</p>
-                    <button
-                      onClick={handleGenerateApiKey}
-                      className="regenerate-button"
-                      aria-label="Generate new API key"
-                      disabled={loading}
-                    >
-                      <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                        <path d="M19 13h-6v6h-2v-6H5v-2h6V5h2v6h6v2z" />
-                      </svg>
-                      {loading ? "Generating..." : "Generate API Key"}
-                    </button>
-                  </div>
+                ))}
+              </dl>
+            </div>
+          </section>
+        </div>
+
+        <section className="dv-reference" aria-labelledby="dv-ref-title">
+          <div className="dv-ref-head">
+            <h2 id="dv-ref-title">Endpoints</h2>
+            <div className="dv-tabs" role="tablist" aria-label="Code language">
+              {LANGUAGES.map((l) => (
+                <button
+                  key={l.id}
+                  role="tab"
+                  aria-selected={language === l.id}
+                  className={language === l.id ? "is-active" : ""}
+                  onClick={() => setLanguage(l.id)}
+                >
+                  {l.label}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <div className="dv-ref-grid">
+            <div className="dv-ref-nav" role="tablist" aria-label="Endpoints" aria-orientation="vertical">
+              {ENDPOINTS.map((e) => (
+                <button
+                  key={e.id}
+                  role="tab"
+                  aria-selected={endpointId === e.id}
+                  aria-controls="dv-endpoint"
+                  className={`dv-ref-link ${endpointId === e.id ? "is-active" : ""}`}
+                  onClick={() => setEndpointId(e.id)}
+                >
+                  <MethodBadge method={e.method} />
+                  <span className="dv-ref-link-text">
+                    <span>{e.title}</span>
+                    <code>{e.path}</code>
+                  </span>
+                </button>
+              ))}
+            </div>
+
+            <article className="dv-endpoint" id="dv-endpoint" role="tabpanel" aria-labelledby="dv-endpoint-title">
+              <h3 id="dv-endpoint-title">{endpoint.title}</h3>
+              <div className="dv-route">
+                <MethodBadge method={endpoint.method} />
+                <code>{BASE_URL}{endpoint.path}</code>
+                <button className="pf-icon-btn" onClick={() => copy(`${BASE_URL}${endpoint.path}`, "URL copied")} aria-label="Copy endpoint URL" title="Copy URL">
+                  <Icon name="copy" size={14} />
+                </button>
+              </div>
+              <p className="dv-desc">{endpoint.description}</p>
+
+              {endpoint.params.length > 0 && (
+                <div className="dv-block">
+                  <h4>Parameters</h4>
+                  <dl className="dv-params">
+                    {endpoint.params.map((p) => (
+                      <div key={p.name}>
+                        <dt>
+                          <code>{p.name}</code>
+                          <span className="dv-param-meta">{p.type}, in {p.where}</span>
+                          {p.required && <span className="dv-required">Required</span>}
+                        </dt>
+                        <dd>{p.text}</dd>
+                      </div>
+                    ))}
+                  </dl>
                 </div>
               )}
-            </div>
-          </div>
 
-          {/* Storage Usage Section */}
-          <div className="card">
-            <div className="p-6">
-              <div className="card-header">
-                <h2 className="card-title">Storage Usage</h2>
+              <div className="dv-block">
+                <h4>Request</h4>
+                <CodeBlock code={sample} language={lang.prism} label={lang.label} onCopy={(c) => copy(c, "Code copied")} />
               </div>
 
-              <div className="storage-stats">
-                <div className="storage-main">
-                  <div className="storage-amount">{formatBytes(localStorageUsage.used)}</div>
-                  <div className="storage-total">of {formatBytes(localStorageUsage.total)}</div>
-                </div>
-                <div className="storage-percentage">{usagePercentage.toFixed(1)}%</div>
-              </div>
-
-              <div className="progress-container">
-                <div
-                  className="progress-bar"
-                  role="progressbar"
-                  aria-valuenow={usagePercentage}
-                  aria-valuemin="0"
-                  aria-valuemax="100"
-                >
-                  <div
-                    className="progress-fill"
-                    style={{
-                      width: `${Math.min(usagePercentage, 100)}%`,
-                      background: `linear-gradient(90deg, ${usageColor}, ${usageColor})`,
-                    }}
-                  ></div>
-                </div>
-              </div>
-
-              <div className="storage-grid">
-                <div className="storage-item">
-                  <div className="storage-value">{formatBytes(localStorageUsage.total - localStorageUsage.used)}</div>
-                  <div className="storage-label">Available</div>
-                </div>
-                <div className="storage-item">
-                  <div className="storage-value">{localStorageUsage.fileCount || 0}</div>
-                  <div className="storage-label">Files</div>
-                </div>
-              </div>
-            </div>
-          </div>
-        </div>
-
-        {/* API Documentation */}
-        <div className="card">
-            <div className="border-b p-6">
-            <div className="flex-container items-center">
-                <svg className="w-5 h-5 text-success mr-2" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M14 2H6c-1.1 0-1.99.9-1.99 2L4 20c0 1.1.89 2 2 2h12c1.1 0 2-.9 2-2V8l-6-6zm2 16H8v-2h8v2zm0-4H8v-2h8v2zm-3-5V3.5L18.5 9H13z" />
-                </svg>
-                <h2 className="text-xl font-semibold text-primary">API Documentation</h2>
-            </div>
-            </div>
-
-    <div className="p-6">
-      <div className="flex-container flex-wrap gap-2 mb-6">
-        {Object.keys(endpoints).map((key) => (
-          <button
-            key={key}
-            onClick={() => setSelectedEndpoint(key)}
-            className={`endpoint-button ${selectedEndpoint === key ? "active" : ""}`}
-            aria-pressed={selectedEndpoint === key}
-            aria-label={`${key} endpoint`}
-          >
-            {key}
-          </button>
-        ))}
-      </div>
-
-      <div className="space-y-4">
-        <div className="flex-container items-center gap-2">
-          <span
-            className="px-2 py-1 rounded text-xs font-medium text-white"
-            style={{
-              backgroundColor: getMethodColor(endpoints[selectedEndpoint].method),
-            }}
-          >
-            {endpoints[selectedEndpoint].method}
-          </span>
-          <code>
-            {process.env.REACT_APP_LINK_FILES}
-            {endpoints[selectedEndpoint].path}
-          </code>
-        </div>
-
-        <p className="text-secondary">{endpoints[selectedEndpoint].description}</p>
-
-        {/* Language Selector */}
-        <div className="flex-container flex-wrap gap-2 mb-2">
-          {Object.keys(endpoints[selectedEndpoint].examples).map((lang) => (
-            <button
-              key={lang}
-              onClick={() => setSelectedLanguage(lang)}
-              className={`language-button endpoint-button ${selectedLanguage === lang ? "active" : ""}`}
-              aria-pressed={selectedLanguage === lang}
-            >
-              {lang.replace(/_/g, " ").toUpperCase()}
-            </button>
-          ))}
-        </div>
-
-        {/* Code Example */}
-        <div>
-          <div className="flex-container items-center justify-between mb-2">
-            <h4 className="font-semibold text-primary">Code Example</h4>
-            <button
-              onClick={() => handleCopyCode(endpoints[selectedEndpoint].examples[selectedLanguage], `example-${selectedEndpoint}-${selectedLanguage}`)}
-              className="action-button text-sm"
-              aria-label="Copy code example"
-            >
-              <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
-              </svg>
-              {copySuccess === `example-${selectedEndpoint}-${selectedLanguage}` ? "Copied!" : "Copy"}
-            </button>
-          </div>
-          <pre className="code-block">
-            <Highlight code={endpoints[selectedEndpoint].examples[selectedLanguage]} language={selectedLanguage.split(" ")[0]} >
-                {({ className, style, tokens, getLineProps, getTokenProps }) => (
-                    <pre className={className} style={{ ...style, padding: '16px', borderRadius: '8px' }}>
-                    {tokens.map((line, i) => (
-                        <div key={i} {...getLineProps({ line })}>
-                        {line.map((token, key) => (
-                            <span key={key} {...getTokenProps({ token })} />
-                        ))}
-                        </div>
-                    ))}
-                    </pre>
+              <div className="dv-block">
+                <h4>Response</h4>
+                {endpoint.response ? (
+                  <CodeBlock
+                    code={JSON.stringify(endpoint.response, null, 2)}
+                    language="json"
+                    label="200 OK"
+                    onCopy={(c) => copy(c, "Response copied")}
+                  />
+                ) : (
+                  <p className="dv-muted">{endpoint.responseNote}</p>
                 )}
-                </Highlight>
-          </pre>
-        </div>
+              </div>
 
-        {/* Response */}
-        <div>
-          <div className="flex-container items-center justify-between mb-2">
-            <h4 className="font-semibold text-primary">Response</h4>
-            <button
-              onClick={() => handleCopyCode(endpoints[selectedEndpoint].response, `response-${selectedEndpoint}`)}
-              className="action-button text-sm"
-              aria-label="Copy response example"
-            >
-              <svg className="w-3 h-3 mr-1" fill="currentColor" viewBox="0 0 24 24" aria-hidden="true">
-                <path d="M16 1H4c-1.1 0-2 .9-2 2v14h2V3h12V1zm3 4H8c-1.1 0-2 .9-2 2v14c0 1.1.9 2 2 2h11c1.1 0 2-.9 2-2V7c0-1.1-.9-2-2-2zm0 16H8V7h11v14z" />
-              </svg>
-              {copySuccess === `response-${selectedEndpoint}` ? "Copied!" : "Copy"}
-            </button>
+              <div className="dv-block">
+                <h4>Errors</h4>
+                <p className="dv-muted dv-small">Errors come back as JSON with an error message, like <code>{'{"error": "Invalid API key"}'}</code>.</p>
+                <dl className="dv-errors">
+                  {errors.map((e) => (
+                    <div key={`${e.status}-${e.text}`}>
+                      <dt className="pf-num">{e.status}</dt>
+                      <dd>{e.text}</dd>
+                    </div>
+                  ))}
+                </dl>
+              </div>
+            </article>
           </div>
-          <pre className="code-block">
-            <code>{endpoints[selectedEndpoint].response}</code>
-          </pre>
-        </div>
-      </div>
-    </div>
-        </div>
+        </section>
+      </main>
 
-        {/* Quick Start Guide */}
-        <div className="quick-start">
-          <h3>🚀 Quick Start</h3>
-          <div className="space-y-2 text-sm">
-            <div className="step">
-              <span className="step-number">1</span>
-              <span>Generate your API key above</span>
-            </div>
-            <div className="step">
-              <span className="step-number">2</span>
-              <span>
-                Include the API key in your requests:{" "}
-                <code className="inline-code">Authorization: Bearer YOUR_API_KEY</code>
-              </span>
-            </div>
-            <div className="step">
-              <span className="step-number">3</span>
-              <span>Start uploading and managing files through the API endpoints</span>
-            </div>
-            <div className="step">
-              <span className="step-number">4</span>
-              <span>Monitor your storage usage and file count</span>
-            </div>
-          </div>
-        </div>
-      </div>
+      <Toasts toasts={toasts} dismiss={dismiss} />
+      <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }

@@ -1,11 +1,10 @@
-"use client"
-
-import { useEffect, useState, useRef, useMemo } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import { useDispatch, useSelector } from "react-redux"
+import { useNavigate } from "react-router-dom"
+import axios from "axios"
 import {
   DeleteFile,
   GetUserFiles,
-  uploadFile,
   resendVerificationEmail,
   getCookie,
   GetUserFolders,
@@ -15,13 +14,41 @@ import {
   MoveFile,
   ToggleVisibility,
   getStorageUsage,
+  logout,
 } from "../redux/userSlice"
-import Swal from "sweetalert2"
-import { useNavigate } from "react-router-dom"
-import { logout } from "../redux/userSlice"
 import SettingsModal from "./SettingsModal"
+import Icon, { FileGlyph } from "./profile/Icon"
+import FileDetails from "./profile/FileDetails"
+import UploadPanel from "./profile/UploadPanel"
+import Toasts, { useToasts } from "./profile/Toasts"
+import { confirmDialog } from "./profile/confirm"
+import { SORTS, fileType, formatBytes, readPref, relativeTime, sizeInBytes, writePref } from "./profile/fileUtils"
 import "../Profile.css"
 
+const MAX_SIZE = 5 * 1024 * 1024
+const MAX_BATCH = 20
+const FILE_DRAG_TYPE = "application/x-savage-file"
+
+const VIEWS = {
+  home: { title: "My Drive", icon: "home" },
+  recent: { title: "Recent", icon: "clock" },
+  shared: { title: "Public links", icon: "globe" },
+  all: { title: "All files", icon: "files" },
+}
+
+function uploadErrorMessage(error) {
+  const data = error?.response?.data
+  if (typeof data === "string" && data.trim()) return data.trim()
+  if (data?.error) return data.error
+  if (!error?.response) return "Connection lost. Check your network and retry."
+  return "Upload failed"
+}
+
+function placeMenu(x, y, width, height) {
+  const left = Math.max(8, Math.min(x, window.innerWidth - width - 8))
+  const top = y + height > window.innerHeight - 8 ? Math.max(8, y - height) : y
+  return { left, top }
+}
 
 function Profile() {
   const files = useSelector((state) => state.user.files)
@@ -29,32 +56,43 @@ function Profile() {
   const user = useSelector((state) => state.user.user)
   const storageUsage = useSelector((state) => state.user.storageUsage)
   const dispatch = useDispatch()
-
-  const [dragOver, setDragOver] = useState(false)
-  const [fileQueue, setFileQueue] = useState([])
-  const [uploading, setUpload] = useState(false)
-  const [currentFolderId, setCurrentFolderId] = useState(null)
-  const [view, setView] = useState("home") // home | recent | all
-  const [layout, setLayout] = useState("grid") // grid | list
-  const [search, setSearch] = useState("")
-  const [showNewModal, setShowNewModal] = useState(false)
-  const [showNewFolderInput, setShowNewFolderInput] = useState(false)
-  const [newFolderName, setNewFolderName] = useState("")
-  const [renamingFolder, setRenamingFolder] = useState(null)
-  const [renameValue, setRenameValue] = useState("")
-  const [contextMenu, setContextMenu] = useState(null)       // {x,y,file}
-  const [folderMenu, setFolderMenu] = useState(null)         // {x,y,folder}
-  const [isSettingsOpen, setIsSettingsOpen] = useState(false)
-  const [sidebarOpen, setSidebarOpen] = useState(false)
-
   const navigate = useNavigate()
-  const fileInputRef = useRef(null)
-  const rootFileInputRef = useRef(null)
 
-  const handleLogout = () => {
-    dispatch(logout())
-    navigate("/login")
-  }
+  const [view, setView] = useState("home")
+  const [currentFolderId, setCurrentFolderId] = useState(null)
+  const [layout, setLayout] = useState(() => readPref("layout", "grid", ["grid", "list"]))
+  const [sort, setSort] = useState(() => readPref("sort", "newest", Object.keys(SORTS)))
+  const [search, setSearch] = useState("")
+  const [selectedId, setSelectedId] = useState(null)
+  const [queue, setQueue] = useState([])
+  const [fileMenu, setFileMenu] = useState(null)
+  const [folderMenu, setFolderMenu] = useState(null)
+  const [newMenu, setNewMenu] = useState(null)
+  const [creatingFolder, setCreatingFolder] = useState(false)
+  const [newFolderName, setNewFolderName] = useState("")
+  const [renamingFolderId, setRenamingFolderId] = useState(null)
+  const [renameValue, setRenameValue] = useState("")
+  const [sidebarOpen, setSidebarOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [externalDrag, setExternalDrag] = useState(false)
+  const [dropTarget, setDropTarget] = useState(null)
+
+  const { toasts, push: toast, dismiss: dismissToast } = useToasts()
+  const fileInputRef = useRef(null)
+  const uploadTargetRef = useRef(null)
+  const searchRef = useRef(null)
+  const dragDepth = useRef(0)
+
+  const loading = files === null
+  const allFiles = useMemo(() => files || [], [files])
+  const currentFolder = folders.find((f) => f._id === currentFolderId) || null
+  const selectedFile = allFiles.find((f) => String(f.ID) === String(selectedId)) || null
+  const folderName = useCallback((id) => folders.find((f) => f._id === id)?.name, [folders])
+
+  const refresh = useCallback(() => {
+    dispatch(GetUserFiles(user?._id))
+    dispatch(getStorageUsage(user?._id))
+  }, [dispatch, user?._id])
 
   useEffect(() => {
     if (user?._id) {
@@ -62,904 +100,977 @@ function Profile() {
       dispatch(GetUserFolders(user._id))
       dispatch(getStorageUsage(user._id))
     }
-  }, [user, dispatch])
+  }, [user?._id, dispatch])
+
+  useEffect(() => writePref("layout", layout), [layout])
+  useEffect(() => writePref("sort", sort), [sort])
 
   useEffect(() => {
-    const onDocMouseDown = () => {
-      setContextMenu((cm) => (cm ? null : cm))
-      setFolderMenu((fm) => (fm ? null : fm))
+    const closeMenus = () => {
+      setFileMenu(null)
+      setFolderMenu(null)
+      setNewMenu(null)
     }
-    document.addEventListener("mousedown", onDocMouseDown)
-    return () => document.removeEventListener("mousedown", onDocMouseDown)
-  }, [])
-
-  useEffect(() => {
-    if (!showNewModal) return
-    const onKey = (e) => { if (e.key === "Escape") setShowNewModal(false) }
+    const onKey = (e) => {
+      const typing = /^(INPUT|TEXTAREA|SELECT)$/.test(e.target.tagName)
+      if (e.key === "/" && !typing) {
+        e.preventDefault()
+        searchRef.current?.focus()
+      }
+      if (e.key === "Escape") {
+        if (fileMenu || folderMenu || newMenu) closeMenus()
+        else if (selectedId) setSelectedId(null)
+        else if (sidebarOpen) setSidebarOpen(false)
+      }
+    }
+    document.addEventListener("mousedown", closeMenus)
     document.addEventListener("keydown", onKey)
-    return () => document.removeEventListener("keydown", onKey)
-  }, [showNewModal])
+    window.addEventListener("resize", closeMenus)
+    return () => {
+      document.removeEventListener("mousedown", closeMenus)
+      document.removeEventListener("keydown", onKey)
+      window.removeEventListener("resize", closeMenus)
+    }
+  }, [fileMenu, folderMenu, newMenu, selectedId, sidebarOpen])
 
-  const currentFolder = folders.find((f) => f._id === currentFolderId) || null
+  const folderCounts = useMemo(() => {
+    const counts = {}
+    allFiles.forEach((f) => {
+      if (f.folderId) counts[f.folderId] = (counts[f.folderId] || 0) + 1
+    })
+    return counts
+  }, [allFiles])
+
+  const searching = search.trim().length > 0
 
   const visibleFiles = useMemo(() => {
-    let list = files || []
-    if (view === "recent") {
-      list = [...list].sort((a, b) => new Date(b.CreatedAt) - new Date(a.CreatedAt)).slice(0, 30)
-    } else if (view === "all") {
-      // flat list of everything
-    } else {
-      list = list.filter((f) =>
-        currentFolderId ? String(f.folderId) === String(currentFolderId) : !f.folderId
-      )
-    }
-    if (search.trim()) {
+    let list = allFiles
+    if (searching) {
       const q = search.trim().toLowerCase()
       list = list.filter((f) => f.Filename?.toLowerCase().includes(q))
+    } else if (view === "home") {
+      list = list.filter((f) => (currentFolderId ? String(f.folderId) === String(currentFolderId) : !f.folderId))
+    } else if (view === "shared") {
+      list = list.filter((f) => f.isPublic)
     }
-    return list
-  }, [files, view, currentFolderId, search])
+    const sorted = [...list].sort(view === "recent" && !searching ? SORTS.newest.compare : SORTS[sort].compare)
+    return view === "recent" && !searching ? sorted.slice(0, 30) : sorted
+  }, [allFiles, searching, search, view, currentFolderId, sort])
 
-  const showFolders = view === "home" && !currentFolderId
+  const showFolderLocation = searching || view !== "home"
+  const showFolders = !searching && view === "home" && !currentFolderId
+  const totalBytes = visibleFiles.reduce((sum, f) => sum + sizeInBytes(f), 0)
 
-  const MAX_FILES = 5
-  const MAX_SIZE = 5 * 1024 * 1024
-
-  const addFilesToQueue = (incoming, { toRoot = false } = {}) => {
-    const valid = Array.from(incoming).filter((f) => {
-      if (f.size > MAX_SIZE) {
-        Swal.fire("Too large", `"${f.name}" exceeds 5 MB and was skipped.`, "warning")
-        return false
-      }
-      return true
-    })
-    setFileQueue((prev) => {
-      const combined = [...prev, ...valid.map((f) => ({ file: f, status: "pending", toRoot }))]
-      if (combined.length > MAX_FILES) {
-        Swal.fire("Limit reached", `Max ${MAX_FILES} files at once. Extra files were ignored.`, "warning")
-        return combined.slice(0, MAX_FILES)
-      }
-      return combined
-    })
+  const goTo = (nextView, folderId = null) => {
+    setView(nextView)
+    setCurrentFolderId(folderId)
+    setSearch("")
+    setSidebarOpen(false)
   }
 
-  const handleFileChange = (e) => {
-    addFilesToQueue(e.target.files)
-    e.target.value = ""
+  const handleLogout = () => {
+    dispatch(logout())
+    navigate("/login")
   }
 
-  const handleModalFileChange = (e) => {
-    addFilesToQueue(e.target.files)
-    e.target.value = ""
-    setShowNewModal(false)
-  }
+  const shareUrl = (id, mode) => `${process.env.REACT_APP_LINK_FILES}/${mode}/${id}`
+  const openUrl = (file, mode) =>
+    file.isPublic ? shareUrl(file.ID, mode) : `${shareUrl(file.ID, mode)}?token=${encodeURIComponent(getCookie("token"))}`
 
-  const handleDrop = (e) => {
-    e.preventDefault()
-    setDragOver(false)
-    addFilesToQueue(e.dataTransfer.files)
-  }
-
-  const removeFromQueue = (index) => {
-    setFileQueue((prev) => prev.filter((_, i) => i !== index))
-  }
-
-  const handleUpload = async () => {
-    if (fileQueue.length === 0) return
-    setUpload(true)
-
-    for (let i = 0; i < fileQueue.length; i++) {
-      const entry = fileQueue[i]
-      if (entry.status !== "pending") continue
-
-      setFileQueue((prev) => prev.map((e, idx) => idx === i ? { ...e, status: "uploading" } : e))
-
-      const formData = new FormData()
-      formData.append("file", entry.file)
-
-      try {
-        const result = await dispatch(uploadFile({ userId: user?._id, file: formData })).unwrap()
-
-        if (!entry.toRoot && currentFolderId && result?.fileId) {
-          const refreshed = await dispatch(GetUserFiles(user._id)).unwrap()
-          const newest = (refreshed?.files || [])
-            .filter((f) => !f.folderId)
-            .sort((a, b) => new Date(b.CreatedAt) - new Date(a.CreatedAt))[0]
-          if (newest) {
-            await dispatch(MoveFile({ fileId: newest.ID, userId: user._id, folderId: currentFolderId }))
-          }
-        }
-
-        setFileQueue((prev) => prev.map((e, idx) => idx === i ? { ...e, status: "done" } : e))
-      } catch {
-        setFileQueue((prev) => prev.map((e, idx) => idx === i ? { ...e, status: "error" } : e))
-      }
+  const enqueue = (fileList, folderId) => {
+    const incoming = Array.from(fileList || [])
+    if (incoming.length === 0) return
+    if (incoming.length > MAX_BATCH) {
+      toast(`Only the first ${MAX_BATCH} files were added. Upload the rest in another batch.`, { tone: "error" })
     }
-
-    await dispatch(GetUserFiles(user._id))
-    await dispatch(getStorageUsage(user._id))
-    setUpload(false)
-    setTimeout(() => setFileQueue((prev) => prev.filter((e) => e.status === "pending")), 2000)
+    const free = Math.max(0, (storageUsage?.total || 0) - (storageUsage?.used || 0))
+    let reserved = queue.filter((e) => e.status === "queued" || e.status === "uploading").reduce((s, e) => s + e.size, 0)
+    const entries = incoming.slice(0, MAX_BATCH).map((file, i) => {
+      const entry = {
+        id: `${Date.now()}-${i}-${file.name}`,
+        file,
+        name: file.name,
+        size: file.size,
+        folderId,
+        folderName: folderId ? folderName(folderId) : null,
+        status: "queued",
+        progress: 0,
+      }
+      if (file.size > MAX_SIZE) return { ...entry, status: "error", error: `Larger than 5 MB (${formatBytes(file.size)})` }
+      if (storageUsage?.total && reserved + file.size > free) return { ...entry, status: "error", error: "Not enough storage left" }
+      reserved += file.size
+      return entry
+    })
+    setQueue((q) => [...q.filter((e) => e.status !== "done"), ...entries])
   }
 
-  // auto-upload when queue gets new pending items
+  const updateEntry = (id, patch) => setQueue((q) => q.map((e) => (e.id === id ? { ...e, ...patch } : e)))
+
   useEffect(() => {
-    if (!uploading && fileQueue.some((e) => e.status === "pending")) {
-      handleUpload()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [fileQueue.length])
+    if (queue.some((e) => e.status === "uploading")) return
+    const next = queue.find((e) => e.status === "queued")
+    if (!next) return
 
-  const handleDelete = (fileId) => {
-    Swal.fire({
-      title: "Delete this file?",
-      text: "You will not be able to recover it.",
-      icon: "warning",
-      showCancelButton: true,
-      confirmButtonColor: "#f87171",
-      cancelButtonColor: "#3b3b42",
-      confirmButtonText: "Delete",
-      background: "#111114",
-      color: "#f1f1f4",
-    }).then(async (result) => {
-      if (result.isConfirmed) {
-        Swal.fire({ title: "Deleting...", background: "#111114", color: "#f1f1f4", allowOutsideClick: false, didOpen: () => Swal.showLoading() })
-        try {
-          await dispatch(DeleteFile({ fileId, userId: user._id })).unwrap()
-          await dispatch(GetUserFiles(user._id))
-          await dispatch(getStorageUsage(user._id))
-          Swal.fire({ title: "Deleted", text: "Your file has been deleted.", icon: "success", background: "#111114", color: "#f1f1f4" })
-        } catch {
-          Swal.fire({ title: "Error", text: "There was an issue deleting your file.", icon: "error", background: "#111114", color: "#f1f1f4" })
+    updateEntry(next.id, { status: "uploading", progress: 0 })
+    const form = new FormData()
+    form.append("file", next.file)
+
+    axios
+      .post(`${process.env.REACT_APP_LINK_FILES}/upload`, form, {
+        headers: { Authorization: getCookie("token") },
+        onUploadProgress: (e) => {
+          if (e.total) updateEntry(next.id, { progress: Math.min(99, Math.round((e.loaded / e.total) * 100)) })
+        },
+      })
+      .then(async (res) => {
+        if (next.folderId && res.data?.fileId) {
+          await dispatch(MoveFile({ fileId: res.data.fileId, folderId: next.folderId }))
         }
-      }
-    })
+        updateEntry(next.id, { status: "done", progress: 100 })
+      })
+      .catch((error) => {
+        const status = error?.response?.status
+        updateEntry(next.id, {
+          status: "error",
+          error: uploadErrorMessage(error),
+          retryable: !status || status >= 500,
+        })
+      })
+      .finally(refresh)
+  }, [queue, dispatch, refresh])
+
+  const pickFiles = (folderId) => {
+    uploadTargetRef.current = folderId
+    fileInputRef.current?.click()
   }
 
-  const handleCopy = (fileId, isPublic) => {
-    if (!isPublic) {
-      Swal.fire({ title: "Private file", text: "Make the file public before sharing its link.", icon: "info", background: "#111114", color: "#f1f1f4" })
-      return
-    }
-    navigator.clipboard.writeText(process.env.REACT_APP_LINK_FILES + `/inspect/${fileId}`)
-    Swal.fire({ toast: true, position: "bottom-end", icon: "success", title: "Link copied", showConfirmButton: false, timer: 1500, background: "#111114", color: "#f1f1f4" })
+  const onFileInput = (e) => {
+    enqueue(e.target.files, uploadTargetRef.current)
+    e.target.value = ""
   }
 
-  const handleCopyDownload = (fileId, isPublic) => {
-    if (!isPublic) {
-      Swal.fire({ title: "Private file", text: "Make the file public before sharing its link.", icon: "info", background: "#111114", color: "#f1f1f4" })
-      return
-    }
-    navigator.clipboard.writeText(process.env.REACT_APP_LINK_FILES + `/download/${fileId}`)
-    Swal.fire({ toast: true, position: "bottom-end", icon: "success", title: "Download link copied", showConfirmButton: false, timer: 1500, background: "#111114", color: "#f1f1f4" })
-  }
-
-  const handleToggleVisibility = async (fileId) => {
-    await dispatch(ToggleVisibility({ fileId, userId: user._id }))
-  }
-
-  const handleCreateFolder = async () => {
-    if (!newFolderName.trim()) return
+  const copyText = async (text, message) => {
     try {
-      await dispatch(CreateFolder({ userId: user._id, name: newFolderName.trim() })).unwrap()
-      setNewFolderName("")
-      setShowNewFolderInput(false)
+      await navigator.clipboard.writeText(text)
+      toast(message)
     } catch {
-      Swal.fire({ title: "Error", text: "Could not create folder.", icon: "error", background: "#111114", color: "#f1f1f4" })
+      toast("Couldn't copy. Select the link and copy it manually.", { tone: "error" })
     }
   }
 
-  const handleDeleteFolder = (folderId, folderName) => {
-    Swal.fire({
-      title: `Delete "${folderName}"?`,
-      text: "Files inside will be moved back to root.",
-      icon: "warning",
-      showCancelButton: true,
-      confirmButtonColor: "#f87171",
-      confirmButtonText: "Delete",
-      background: "#111114",
-      color: "#f1f1f4",
-    }).then(async (result) => {
-      if (result.isConfirmed) {
-        await dispatch(DeleteFolder({ folderId, userId: user._id }))
-        await dispatch(GetUserFiles(user._id))
-        await dispatch(GetUserFolders(user._id))
-        if (currentFolderId === folderId) setCurrentFolderId(null)
-      }
+  const setVisibility = async (file, makePublic) => {
+    if (!!file.isPublic === makePublic) return true
+    const result = await dispatch(ToggleVisibility({ fileId: file.ID }))
+    if (ToggleVisibility.rejected.match(result)) {
+      toast("Couldn't change who can see this file. Try again.", { tone: "error" })
+      return false
+    }
+    return true
+  }
+
+  const toggleVisibility = async (file) => {
+    const makePublic = !file.isPublic
+    if (!(await setVisibility(file, makePublic))) return
+    if (makePublic) {
+      toast("Public link is on", {
+        action: { label: "Copy link", onClick: () => copyText(shareUrl(file.ID, "inspect"), "Link copied") },
+      })
+    } else {
+      toast("File is private. Old links no longer work.")
+    }
+  }
+
+  const copyLink = (file, mode = "inspect") => {
+    const label = mode === "download" ? "Download link copied" : "Link copied"
+    if (file.isPublic) {
+      copyText(shareUrl(file.ID, mode), label)
+      return
+    }
+    toast("This file is private, so its link won't open for others.", {
+      action: {
+        label: "Make public and copy",
+        onClick: async () => {
+          if (await setVisibility(file, true)) copyText(shareUrl(file.ID, mode), label)
+        },
+      },
     })
   }
 
-  const handleRenameFolder = async (folderId) => {
-    if (!renameValue.trim()) return
-    await dispatch(RenameFolder({ folderId, userId: user._id, name: renameValue.trim() }))
-    setRenamingFolder(null)
-    setRenameValue("")
-  }
-
-  const fileUrl = (fileId, mode, isPublic) => {
-    const base = `${process.env.REACT_APP_LINK_FILES}/${mode}/${fileId}`
-    return isPublic ? base : `${base}?token=${getCookie("token")}`
-  }
-
-  const handleMoveFile = async (fileId, folderId) => {
-    await dispatch(MoveFile({ fileId, userId: user._id, folderId }))
+  const moveFile = async (file, folderId) => {
+    if (String(file.folderId || "") === String(folderId || "")) return
+    const result = await dispatch(MoveFile({ fileId: file.ID, folderId }))
+    if (MoveFile.rejected.match(result)) {
+      toast("Couldn't move the file. Try again.", { tone: "error" })
+      return
+    }
     await dispatch(GetUserFiles(user._id))
+    toast(`Moved to ${folderId ? folderName(folderId) : "My Drive"}`)
   }
 
-  const handleResendVerification = async () => {
-    Swal.fire({
-      title: "Sending email...",
-      background: "#111114",
-      color: "#f1f1f4",
-      showConfirmButton: false,
-      allowOutsideClick: false,
-      didOpen: () => Swal.showLoading(),
+  const deleteFile = async (file) => {
+    const ok = await confirmDialog({
+      title: `Delete "${file.Filename}"?`,
+      text: "The file and its public link are removed for good.",
+      confirmLabel: "Delete file",
     })
+    if (!ok) return
+    try {
+      await dispatch(DeleteFile({ fileId: file.ID })).unwrap()
+      if (String(selectedId) === String(file.ID)) setSelectedId(null)
+      refresh()
+      toast(`Deleted ${file.Filename}`)
+    } catch {
+      toast("Couldn't delete the file. Try again.", { tone: "error" })
+    }
+  }
+
+  const createFolder = async () => {
+    const name = newFolderName.trim()
+    if (!name) return
+    try {
+      const result = await dispatch(CreateFolder({ name })).unwrap()
+      setNewFolderName("")
+      setCreatingFolder(false)
+      toast(`Created ${name}`)
+      if (result?.folder?._id) goTo("home", result.folder._id)
+    } catch {
+      toast("Couldn't create the folder. Try again.", { tone: "error" })
+    }
+  }
+
+  const startRename = (folder) => {
+    setRenamingFolderId(folder._id)
+    setRenameValue(folder.name)
+  }
+
+  const finishRename = async () => {
+    const name = renameValue.trim()
+    const folder = folders.find((f) => f._id === renamingFolderId)
+    setRenamingFolderId(null)
+    if (!folder || !name || name === folder.name) return
+    const result = await dispatch(RenameFolder({ folderId: folder._id, name }))
+    if (RenameFolder.rejected.match(result)) toast("Couldn't rename the folder.", { tone: "error" })
+  }
+
+  const deleteFolder = async (folder) => {
+    const count = folderCounts[folder._id] || 0
+    const ok = await confirmDialog({
+      title: `Delete "${folder.name}"?`,
+      text: count
+        ? `Its ${count === 1 ? "file moves" : `${count} files move`} back to My Drive. No files are deleted.`
+        : "The folder is empty.",
+      confirmLabel: "Delete folder",
+    })
+    if (!ok) return
+    await dispatch(DeleteFolder({ folderId: folder._id }))
+    await dispatch(GetUserFiles(user._id))
+    await dispatch(GetUserFolders(user._id))
+    if (currentFolderId === folder._id) goTo("home")
+    toast(`Deleted folder ${folder.name}`)
+  }
+
+  const resendVerification = async () => {
     try {
       await dispatch(resendVerificationEmail()).unwrap()
-    } catch {}
-    Swal.fire({
-      title: "Sent",
-      text: "A new verification email has been sent to your inbox.",
-      icon: "success",
-      confirmButtonColor: "#8b5cf6",
-      background: "#111114",
-      color: "#f1f1f4",
-    })
+      toast(`Verification email sent to ${user?.email}`)
+    } catch {
+      toast("Couldn't send the email. Try again in a minute.", { tone: "error" })
+    }
   }
 
-  const formatBytes = (bytes) => {
-    if (!bytes) return "0 B"
-    const units = ["B", "KB", "MB", "GB", "TB"]
-    let i = 0
-    let v = bytes
-    while (v >= 1024 && i < units.length - 1) { v /= 1024; i++ }
-    return `${v.toFixed(v < 10 && i > 0 ? 1 : 0)} ${units[i]}`
-  }
-
-  const fileExt = (name = "") => {
-    const parts = name.split(".")
-    return parts.length > 1 ? parts.pop().toUpperCase().slice(0, 4) : "FILE"
-  }
-
-  const fileIconStyle = (name = "") => {
-    const ext = fileExt(name)
-    let color = "#9199a8"
-    if (["JPG", "JPEG", "PNG", "GIF", "WEBP", "SVG"].includes(ext)) color = "#34d399"
-    else if (["MP4", "MOV", "AVI", "WEBM"].includes(ext)) color = "#f87171"
-    else if (["MP3", "WAV", "OGG", "FLAC"].includes(ext)) color = "#fbbf24"
-    else if (["PDF"].includes(ext)) color = "#fb7185"
-    else if (["ZIP", "RAR", "7Z", "TAR", "GZ"].includes(ext)) color = "#8b5cf6"
-    else if (["JS", "TS", "JSX", "TSX", "PY", "GO", "JAVA", "CPP", "C", "RB"].includes(ext)) color = "#60a5fa"
-    return { "--pf-ext-color": color, "--pf-ext-bg": `${color}22` }
-  }
-
-  const storagePct = storageUsage?.total
-    ? Math.min(100, Math.round((storageUsage.used / storageUsage.total) * 100))
-    : 0
-
-  const MENU_WIDTH = 210
-  const MENU_HEIGHT = 200
-
-  const onContextMenu = (e, file) => {
+  const openFileMenu = (e, file) => {
     e.preventDefault()
-    const x = e.clientX + MENU_WIDTH > window.innerWidth ? e.clientX - MENU_WIDTH : e.clientX
-    const y = e.clientY + MENU_HEIGHT > window.innerHeight ? e.clientY - MENU_HEIGHT : e.clientY
-    setContextMenu({ x, y, file })
+    e.stopPropagation()
+    const anchor = e.type === "contextmenu" ? { x: e.clientX, y: e.clientY } : (() => {
+      const r = e.currentTarget.getBoundingClientRect()
+      return { x: r.right - 220, y: r.bottom + 4 }
+    })()
+    setFolderMenu(null)
+    setNewMenu(null)
+    setFileMenu({ file, ...placeMenu(anchor.x, anchor.y, 220, 250) })
   }
 
-  const openMoreMenu = (e, file) => {
+  const openFolderMenu = (e, folder) => {
+    e.preventDefault()
     e.stopPropagation()
     const r = e.currentTarget.getBoundingClientRect()
-    const x = r.right + MENU_WIDTH > window.innerWidth ? r.left - MENU_WIDTH : r.right
-    const y = r.bottom + MENU_HEIGHT > window.innerHeight ? r.top - MENU_HEIGHT : r.bottom
-    setContextMenu({ x, y, file })
+    setFileMenu(null)
+    setFolderMenu({ folder, ...placeMenu(r.right - 190, r.bottom + 4, 190, 110) })
   }
+
+  const openNewMenu = (e) => {
+    e.stopPropagation()
+    const r = e.currentTarget.getBoundingClientRect()
+    setNewMenu(newMenu ? null : placeMenu(r.left, r.bottom + 6, 260, 130))
+  }
+
+  const isFileDrag = (e) => Array.from(e.dataTransfer?.types || []).includes("Files")
+  const isMoveDrag = (e) => Array.from(e.dataTransfer?.types || []).includes(FILE_DRAG_TYPE)
+
+  const mainDragEnter = (e) => {
+    if (!isFileDrag(e)) return
+    dragDepth.current += 1
+    setExternalDrag(true)
+  }
+  const mainDragLeave = (e) => {
+    if (!isFileDrag(e)) return
+    dragDepth.current = Math.max(0, dragDepth.current - 1)
+    if (dragDepth.current === 0) setExternalDrag(false)
+  }
+  const mainDragOver = (e) => {
+    if (isFileDrag(e)) e.preventDefault()
+  }
+  const mainDrop = (e) => {
+    if (!isFileDrag(e)) return
+    e.preventDefault()
+    dragDepth.current = 0
+    setExternalDrag(false)
+    enqueue(e.dataTransfer.files, view === "home" ? currentFolderId : null)
+  }
+
+  const dropTargetProps = (targetId) => ({
+    onDragOver: (e) => {
+      if (!isMoveDrag(e) && !isFileDrag(e)) return
+      e.preventDefault()
+      e.stopPropagation()
+      e.dataTransfer.dropEffect = isMoveDrag(e) ? "move" : "copy"
+      if (dropTarget !== targetId) setDropTarget(targetId)
+    },
+    onDragLeave: () => setDropTarget((t) => (t === targetId ? null : t)),
+    onDrop: (e) => {
+      e.preventDefault()
+      e.stopPropagation()
+      setDropTarget(null)
+      dragDepth.current = 0
+      setExternalDrag(false)
+      const folderId = targetId === "root" ? null : targetId
+      if (isMoveDrag(e)) {
+        const file = allFiles.find((f) => String(f.ID) === e.dataTransfer.getData(FILE_DRAG_TYPE))
+        if (file) moveFile(file, folderId)
+      } else {
+        enqueue(e.dataTransfer.files, folderId)
+      }
+    },
+  })
+
+  const fileDragProps = (file) => ({
+    draggable: true,
+    onDragStart: (e) => {
+      e.dataTransfer.setData(FILE_DRAG_TYPE, String(file.ID))
+      e.dataTransfer.effectAllowed = "move"
+    },
+    onDragEnd: () => setDropTarget(null),
+  })
 
   if (user?.verified === false) {
     return (
       <div className="pf-verify">
         <div className="pf-verify-card">
-          <div className="pf-verify-icon">
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
-              <path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"/>
-              <polyline points="22,6 12,13 2,6"/>
-            </svg>
-          </div>
-
-          <span className="pf-verify-badge">Action required</span>
-
-          <h1 className="pf-verify-title">Verify your email</h1>
+          <span className="pf-verify-icon"><Icon name="mail" size={22} strokeWidth={1.8} /></span>
+          <h1 className="pf-verify-title">Confirm your email to start uploading</h1>
           <p className="pf-verify-sub">
-            We sent a verification link to <strong>{user?.email}</strong>.
-            Open it to unlock your storage and start uploading.
+            We sent a link to <strong>{user?.email}</strong>. Open it, then come back to this page.
           </p>
-
           <ol className="pf-verify-steps">
-            <li><span>1</span> Check your inbox (and spam folder)</li>
-            <li><span>2</span> Click the verification link</li>
-            <li><span>3</span> Come back and refresh</li>
+            <li><span>1</span>Find the email from Savage Files (check spam too)</li>
+            <li><span>2</span>Click Verify your account</li>
+            <li><span>3</span>Refresh this page</li>
           </ol>
-
-          <button className="pf-btn pf-btn--primary pf-btn--block" onClick={handleResendVerification}>
-            <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
-            Resend verification email
+          <button className="pf-btn pf-btn--primary pf-btn--block" onClick={resendVerification}>
+            <Icon name="refresh" size={15} />
+            Send the email again
           </button>
-
           <button className="pf-btn pf-btn--ghost pf-btn--block" onClick={handleLogout}>
             Sign out
           </button>
         </div>
+        <Toasts toasts={toasts} dismiss={dismissToast} />
       </div>
     )
   }
 
-  const titleForView = () => {
-    if (view === "recent") return "Recent"
-    if (view === "all") return "All files"
-    if (currentFolder) return currentFolder.name
-    return "My Drive"
+  const storagePct = storageUsage?.total ? Math.min(100, (storageUsage.used / storageUsage.total) * 100) : 0
+  const storageTone = storagePct >= 95 ? "is-danger" : storagePct >= 80 ? "is-warning" : ""
+
+  const title = searching ? `Results for "${search.trim()}"` : currentFolder && view === "home" ? currentFolder.name : VIEWS[view].title
+  const countLabel = loading
+    ? "Loading files…"
+    : `${visibleFiles.length} ${visibleFiles.length === 1 ? "file" : "files"}${totalBytes ? `, ${formatBytes(totalBytes)}` : ""}`
+
+  const emptyState = () => {
+    if (searching) {
+      return {
+        icon: "search",
+        title: `No files match "${search.trim()}"`,
+        text: "Search looks at file names in every folder.",
+        action: <button className="pf-btn pf-btn--ghost" onClick={() => setSearch("")}>Clear search</button>,
+      }
+    }
+    if (view === "shared") {
+      return {
+        icon: "globe",
+        title: "No public links yet",
+        text: "Open a file and turn on its public link to share it with anyone.",
+      }
+    }
+    if (currentFolder) {
+      return {
+        icon: "folder",
+        title: "This folder is empty",
+        text: "Upload files here, or drag files onto the folder in the sidebar.",
+        action: <button className="pf-btn pf-btn--primary" onClick={() => pickFiles(currentFolder._id)}><Icon name="upload" size={15} />Upload to {currentFolder.name}</button>,
+      }
+    }
+    return {
+      icon: "upload",
+      title: allFiles.length ? "No files outside folders" : "Upload your first file",
+      text: "Drop files anywhere on this page, or choose them from your computer. Up to 5 MB each.",
+      action: <button className="pf-btn pf-btn--primary" onClick={() => pickFiles(null)}><Icon name="upload" size={15} />Upload files</button>,
+    }
   }
+
+  const visibilityChip = (file) =>
+    file.isPublic ? (
+      <span className="pf-chip is-public" title="Anyone with the link can open this file">
+        <Icon name="globe" size={12} />
+        <span className="pf-chip-text">Public</span>
+      </span>
+    ) : null
+
+  const renderGrid = () => (
+    <div className="pf-grid">
+      {visibleFiles.map((file) => {
+        const type = fileType(file.Filename)
+        const selected = String(selectedId) === String(file.ID)
+        return (
+          <div
+            key={file.ID}
+            className={`pf-card ${selected ? "is-selected" : ""} ${file.isPublic ? "is-public" : ""}`}
+            onContextMenu={(e) => openFileMenu(e, file)}
+            {...fileDragProps(file)}
+          >
+            <button
+              className="pf-card-main"
+              onClick={() => setSelectedId(selected ? null : file.ID)}
+              onDoubleClick={() => window.open(openUrl(file, "inspect"), "_blank", "noopener")}
+              aria-pressed={selected}
+              aria-label={`${file.Filename}, ${type.label}, ${file.size}`}
+            >
+              <span className="pf-card-top">
+                <FileGlyph type={type} size={18} />
+                {visibilityChip(file)}
+              </span>
+              <span className="pf-card-name" title={file.Filename}>{file.Filename}</span>
+              <span className="pf-card-meta">
+                {file.size}
+                <span className="pf-sep" aria-hidden="true" />
+                {relativeTime(file.CreatedAt)}
+              </span>
+              {showFolderLocation && file.folderId && folderName(file.folderId) && (
+                <span className="pf-card-loc"><Icon name="folder" size={12} />{folderName(file.folderId)}</span>
+              )}
+            </button>
+            <div className="pf-card-tools">
+              <button className="pf-tool" onClick={() => copyLink(file)} title="Copy link" aria-label={`Copy link to ${file.Filename}`}>
+                <Icon name="link" size={15} />
+              </button>
+              <button className="pf-tool" onClick={(e) => openFileMenu(e, file)} onMouseDown={(e) => e.stopPropagation()} title="More actions" aria-label={`More actions for ${file.Filename}`}>
+                <Icon name="more" size={15} />
+              </button>
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+
+  const sortHeader = (id, label, className) => {
+    const active = sort === id || (id === "newest" && sort === "oldest")
+    const next = id === "newest" ? (sort === "newest" ? "oldest" : "newest") : id
+    const ascending = sort === "oldest" || sort === "name"
+    return (
+      <button
+        className={`pf-th ${className} ${active ? "is-active" : ""}`}
+        onClick={() => setSort(next)}
+        aria-sort={active ? (ascending ? "ascending" : "descending") : "none"}
+        role="columnheader"
+      >
+        {label}
+        {active && <Icon name="chevronDown" size={12} className={ascending ? "pf-rot-180" : ""} />}
+      </button>
+    )
+  }
+
+  const renderList = () => (
+    <div className="pf-table" role="table" aria-label="Files">
+      <div className="pf-tr pf-tr--head" role="row">
+        {sortHeader("name", "Name", "pf-c-name")}
+        <span className="pf-th pf-c-vis">Sharing</span>
+        {sortHeader("largest", "Size", "pf-c-size")}
+        {sortHeader("newest", "Uploaded", "pf-c-date")}
+        {sortHeader("views", "Views", "pf-c-num")}
+        <span className="pf-th pf-c-num">Downloads</span>
+        <span className="pf-th pf-c-act" aria-hidden="true" />
+      </div>
+      {visibleFiles.map((file) => {
+        const type = fileType(file.Filename)
+        const selected = String(selectedId) === String(file.ID)
+        return (
+          <div
+            key={file.ID}
+            role="row"
+            className={`pf-tr ${selected ? "is-selected" : ""}`}
+            onClick={() => setSelectedId(selected ? null : file.ID)}
+            onContextMenu={(e) => openFileMenu(e, file)}
+            {...fileDragProps(file)}
+          >
+            <span className="pf-td pf-c-name" role="cell">
+              <FileGlyph type={type} size={15} />
+              <span className="pf-td-name">
+                <button
+                  className="pf-row-btn"
+                  onClick={(e) => { e.stopPropagation(); setSelectedId(selected ? null : file.ID) }}
+                  aria-pressed={selected}
+                  title={file.Filename}
+                >
+                  {file.Filename}
+                </button>
+                {showFolderLocation && file.folderId && folderName(file.folderId) && (
+                  <span className="pf-td-loc">{folderName(file.folderId)}</span>
+                )}
+              </span>
+            </span>
+            <span className="pf-td pf-c-vis" role="cell">
+              {file.isPublic ? visibilityChip(file) : <span className="pf-chip"><Icon name="lock" size={12} />Private</span>}
+            </span>
+            <span className="pf-td pf-c-size pf-num" role="cell">{file.size}</span>
+            <span className="pf-td pf-c-date" role="cell" title={new Date(file.CreatedAt).toLocaleString()}>{relativeTime(file.CreatedAt)}</span>
+            <span className="pf-td pf-c-num pf-num" role="cell">{(file.views || 0).toLocaleString()}</span>
+            <span className="pf-td pf-c-num pf-num" role="cell">{(file.downloads || 0).toLocaleString()}</span>
+            <span className="pf-td pf-c-act" role="cell">
+              <button className="pf-tool" onClick={(e) => { e.stopPropagation(); copyLink(file) }} title="Copy link" aria-label={`Copy link to ${file.Filename}`}>
+                <Icon name="link" size={15} />
+              </button>
+              <button className="pf-tool" onClick={(e) => openFileMenu(e, file)} onMouseDown={(e) => e.stopPropagation()} title="More actions" aria-label={`More actions for ${file.Filename}`}>
+                <Icon name="more" size={15} />
+              </button>
+            </span>
+          </div>
+        )
+      })}
+    </div>
+  )
+
+  const renderSkeleton = () => (
+    <div className="pf-grid" aria-hidden="true">
+      {Array.from({ length: 8 }).map((_, i) => (
+        <div key={i} className="pf-card pf-card--skeleton">
+          <span className="pf-skel pf-skel--glyph" />
+          <span className="pf-skel pf-skel--line" />
+          <span className="pf-skel pf-skel--short" />
+        </div>
+      ))}
+    </div>
+  )
+
+  const empty = emptyState()
 
   return (
     <div className="pf-app">
-      <input
-        ref={fileInputRef}
-        type="file"
-        multiple
-        onChange={handleFileChange}
-        style={{ display: "none" }}
-      />
-      <input
-        ref={rootFileInputRef}
-        type="file"
-        multiple
-        onChange={handleModalFileChange}
-        style={{ display: "none" }}
-      />
+      <input ref={fileInputRef} type="file" multiple onChange={onFileInput} hidden />
 
-      <div className={`pf-shell ${sidebarOpen ? "pf-shell--sidebar-open" : ""}`}>
-        <div className="pf-sidebar-backdrop" onClick={() => setSidebarOpen(false)} />
+      <div className={`pf-shell ${sidebarOpen ? "is-sidebar-open" : ""} ${selectedFile ? "has-details" : ""}`}>
+        <div className="pf-backdrop" onClick={() => setSidebarOpen(false)} />
 
-        <aside className="pf-sidebar">
-          <div className="pf-brand" onClick={() => { setView("home"); setCurrentFolderId(null) }}>
-            <span className="pf-brand-mark">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                <path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/>
-              </svg>
-            </span>
-            <span className="pf-brand-text">Savage Files</span>
-          </div>
+        <aside className="pf-sidebar" aria-label="Navigation">
+          <button className="pf-brand" onClick={() => goTo("home")}>
+            <span className="pf-brand-mark"><Icon name="folder" size={17} /></span>
+            Savage Files
+          </button>
 
-          <button type="button" className="pf-new-btn" onClick={() => setShowNewModal(true)}>
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-              <line x1="12" y1="5" x2="12" y2="19" />
-              <line x1="5" y1="12" x2="19" y2="12" />
-            </svg>
+          <button className="pf-new" onClick={openNewMenu} onMouseDown={(e) => e.stopPropagation()} aria-haspopup="menu" aria-expanded={!!newMenu}>
+            <Icon name="plus" size={17} strokeWidth={2.4} />
             New
           </button>
 
-          <nav className="pf-nav">
-            <button
-              className={`pf-nav-item ${view === "home" && !currentFolderId ? "is-active" : ""}`}
-              onClick={() => { setView("home"); setCurrentFolderId(null); setSidebarOpen(false) }}
-            >
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/><polyline points="9 22 9 12 15 12 15 22"/></svg>
-              My Drive
-            </button>
-            <button
-              className={`pf-nav-item ${view === "recent" ? "is-active" : ""}`}
-              onClick={() => { setView("recent"); setCurrentFolderId(null); setSidebarOpen(false) }}
-            >
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="10"/><polyline points="12 6 12 12 16 14"/></svg>
-              Recent
-            </button>
-            <button
-              className={`pf-nav-item ${view === "all" ? "is-active" : ""}`}
-              onClick={() => { setView("all"); setCurrentFolderId(null); setSidebarOpen(false) }}
-            >
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/></svg>
-              All files
-            </button>
-            <button className="pf-nav-item" onClick={() => navigate("/developer")}>
-              <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="16 18 22 12 16 6"/><polyline points="8 6 2 12 8 18"/></svg>
-              Developer
-            </button>
-          </nav>
+          <div className="pf-nav" role="navigation" aria-label="Views">
+            {Object.entries(VIEWS).map(([key, v]) => {
+              const active = !searching && view === key && !(key === "home" && currentFolderId)
+              const extra = key === "home" ? dropTargetProps("root") : {}
+              const count = key === "shared" ? allFiles.filter((f) => f.isPublic).length : null
+              return (
+                <button
+                  key={key}
+                  className={`pf-nav-item ${active ? "is-active" : ""} ${key === "home" && dropTarget === "root" ? "is-drop" : ""}`}
+                  onClick={() => goTo(key)}
+                  aria-current={active ? "page" : undefined}
+                  {...extra}
+                >
+                  <Icon name={v.icon} size={17} />
+                  <span className="pf-nav-label">{v.title}</span>
+                  {count > 0 && <span className="pf-nav-count">{count}</span>}
+                </button>
+              )
+            })}
+          </div>
 
           <div className="pf-folders">
             <div className="pf-folders-head">
               <span>Folders</span>
               <button
-                type="button"
-                className="pf-icon-btn-sm"
-                onClick={() => { setShowNewFolderInput(true); setView("home"); setCurrentFolderId(null) }}
+                className="pf-icon-btn pf-icon-btn--sm"
+                onClick={() => { setCreatingFolder(true); setSidebarOpen(false) }}
                 title="New folder"
                 aria-label="New folder"
               >
-                <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round">
-                  <line x1="12" y1="5" x2="12" y2="19" />
-                  <line x1="5" y1="12" x2="19" y2="12" />
-                </svg>
+                <Icon name="plus" size={14} strokeWidth={2.4} />
               </button>
             </div>
             {folders.length === 0 ? (
-              <div className="pf-folders-empty">No folders yet</div>
+              <p className="pf-folders-empty">Group related files into folders.</p>
             ) : (
               <div className="pf-folders-list">
                 {folders.map((f) => (
                   <button
                     key={f._id}
-                    className={`pf-folder-item ${currentFolderId === f._id ? "is-active" : ""}`}
-                    onClick={() => { setView("home"); setCurrentFolderId(f._id); setSidebarOpen(false) }}
+                    className={`pf-nav-item pf-nav-item--folder ${!searching && currentFolderId === f._id ? "is-active" : ""} ${dropTarget === f._id ? "is-drop" : ""}`}
+                    onClick={() => goTo("home", f._id)}
                     title={f.name}
+                    {...dropTargetProps(f._id)}
                   >
-                    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                    <span className="pf-folder-name">{f.name}</span>
+                    <Icon name="folder" size={16} />
+                    <span className="pf-nav-label">{f.name}</span>
+                    {folderCounts[f._id] > 0 && <span className="pf-nav-count">{folderCounts[f._id]}</span>}
                   </button>
                 ))}
               </div>
             )}
           </div>
 
-          <div className="pf-user">
-            <div className="pf-user-info">
-              <div className="pf-avatar">{user?.username?.charAt(0).toUpperCase() || "U"}</div>
-              <div className="pf-user-meta">
+          <div className="pf-sidebar-foot">
+            <div className={`pf-storage ${storageTone}`}>
+              <div className="pf-storage-row">
+                <span>Storage</span>
+                <span className="pf-num">{formatBytes(storageUsage?.used || 0)} of {formatBytes(storageUsage?.total || 0)}</span>
+              </div>
+              <div className="pf-meter" role="progressbar" aria-valuenow={Math.round(storagePct)} aria-valuemin={0} aria-valuemax={100} aria-label="Storage used">
+                <span style={{ width: `${Math.max(storagePct, storageUsage?.used ? 1.5 : 0)}%` }} />
+              </div>
+              <span className="pf-storage-free">
+                {storagePct >= 95 ? "Storage almost full. Delete files to upload more." : `${formatBytes(Math.max(0, (storageUsage?.total || 0) - (storageUsage?.used || 0)))} free`}
+              </span>
+            </div>
+
+            <button className="pf-nav-item" onClick={() => navigate("/developer")}>
+              <Icon name="code" size={17} />
+              <span className="pf-nav-label">Developer API</span>
+            </button>
+
+            <div className="pf-user">
+              <span className="pf-avatar" aria-hidden="true">{user?.username?.charAt(0).toUpperCase() || "U"}</span>
+              <span className="pf-user-meta">
                 <span className="pf-user-name">{user?.username}</span>
                 <span className="pf-user-email">{user?.email}</span>
-              </div>
-            </div>
-            <div className="pf-user-actions">
-              <button className="pf-icon-btn" onClick={() => setIsSettingsOpen(true)} title="Settings" aria-label="Settings">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+              </span>
+              <button className="pf-icon-btn" onClick={() => setSettingsOpen(true)} title="Account settings" aria-label="Account settings">
+                <Icon name="settings" />
               </button>
-              <button className="pf-icon-btn pf-icon-btn--danger" onClick={handleLogout} title="Log out" aria-label="Log out">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+              <button className="pf-icon-btn pf-icon-btn--danger" onClick={handleLogout} title="Sign out" aria-label="Sign out">
+                <Icon name="logout" />
               </button>
-            </div>
-          </div>
-
-          <div className="pf-storage">
-            <div className="pf-storage-label">
-              <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><ellipse cx="12" cy="5" rx="9" ry="3"/><path d="M21 12c0 1.66-4 3-9 3s-9-1.34-9-3"/><path d="M3 5v14c0 1.66 4 3 9 3s9-1.34 9-3V5"/></svg>
-              Storage
-            </div>
-            <div className="pf-storage-bar">
-              <div className="pf-storage-fill" style={{ width: `${storagePct}%` }} />
-            </div>
-            <div className="pf-storage-meta">
-              {formatBytes(storageUsage?.used || 0)} of {formatBytes(storageUsage?.total || 0)} used
             </div>
           </div>
         </aside>
 
         <main
           className="pf-main"
-          onDragOver={(e) => { e.preventDefault(); setDragOver(true) }}
-          onDragLeave={(e) => { if (e.currentTarget === e.target) setDragOver(false) }}
-          onDrop={handleDrop}
+          onDragEnter={mainDragEnter}
+          onDragLeave={mainDragLeave}
+          onDragOver={mainDragOver}
+          onDrop={mainDrop}
         >
-          <div className="pf-topbar">
-            <div className="pf-topbar-left">
-              <button type="button" className="pf-hamburger" onClick={() => setSidebarOpen(true)} aria-label="Open menu">
-                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><line x1="3" y1="6" x2="21" y2="6"/><line x1="3" y1="12" x2="21" y2="12"/><line x1="3" y1="18" x2="21" y2="18"/></svg>
-              </button>
-              <div className="pf-breadcrumb">
-                <button className="pf-crumb" onClick={() => { setView("home"); setCurrentFolderId(null); setSidebarOpen(false) }}>
-                  {view === "home" ? "My Drive" : view === "recent" ? "Recent" : "All files"}
+          <header className="pf-topbar">
+            <button className="pf-icon-btn pf-hamburger" onClick={() => setSidebarOpen(true)} aria-label="Open navigation">
+              <Icon name="menu" size={19} />
+            </button>
+            <label className="pf-search">
+              <Icon name="search" size={16} />
+              <input
+                ref={searchRef}
+                type="search"
+                placeholder="Search all files"
+                value={search}
+                onChange={(e) => setSearch(e.target.value)}
+                aria-label="Search all files"
+              />
+              {search ? (
+                <button className="pf-search-clear" onClick={() => setSearch("")} aria-label="Clear search">
+                  <Icon name="close" size={13} />
                 </button>
-                {currentFolder && view === "home" && (
-                  <>
-                    <span className="pf-crumb-sep">/</span>
-                    <span className="pf-crumb pf-crumb--current">{currentFolder.name}</span>
-                  </>
-                )}
-              </div>
-            </div>
-
-            <div className="pf-topbar-right">
-              <div className="pf-search">
-                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-                <input
-                  type="text"
-                  placeholder="Search in Drive"
-                  value={search}
-                  onChange={(e) => setSearch(e.target.value)}
-                />
-                {search && (
-                  <button className="pf-search-clear" onClick={() => setSearch("")} aria-label="Clear search">✕</button>
-                )}
-              </div>
-
-              <div className="pf-view-toggle">
-                <button
-                  className={`pf-view-btn ${layout === "list" ? "is-active" : ""}`}
-                  onClick={() => setLayout("list")}
-                  title="List view"
-                  aria-label="List view"
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+              ) : (
+                <kbd className="pf-kbd" aria-hidden="true">/</kbd>
+              )}
+            </label>
+            <div className="pf-topbar-tools">
+              <label className="pf-sort" title="Sort files">
+                <Icon name="sort" size={15} />
+                <select value={sort} onChange={(e) => setSort(e.target.value)} aria-label="Sort files">
+                  {Object.entries(SORTS).map(([key, s]) => (
+                    <option key={key} value={key}>{s.label}</option>
+                  ))}
+                </select>
+              </label>
+              <div className="pf-segmented" role="group" aria-label="Layout">
+                <button className={layout === "grid" ? "is-active" : ""} onClick={() => setLayout("grid")} aria-pressed={layout === "grid"} title="Grid" aria-label="Grid layout">
+                  <Icon name="grid" size={15} />
                 </button>
-                <button
-                  className={`pf-view-btn ${layout === "grid" ? "is-active" : ""}`}
-                  onClick={() => setLayout("grid")}
-                  title="Grid view"
-                  aria-label="Grid view"
-                >
-                  <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="3" width="7" height="7"/><rect x="14" y="3" width="7" height="7"/><rect x="14" y="14" width="7" height="7"/><rect x="3" y="14" width="7" height="7"/></svg>
+                <button className={layout === "list" ? "is-active" : ""} onClick={() => setLayout("list")} aria-pressed={layout === "list"} title="List" aria-label="List layout">
+                  <Icon name="list" size={15} />
                 </button>
               </div>
             </div>
-          </div>
+          </header>
 
           <div className="pf-content">
-            {showNewFolderInput && (
-              <div className="pf-new-folder-row">
+            <div className="pf-pagehead">
+              <div className="pf-pagehead-text">
+                {currentFolder && view === "home" && !searching && (
+                  <div className="pf-crumbs" role="navigation" aria-label="Breadcrumb">
+                    <button onClick={() => goTo("home")}>My Drive</button>
+                    <Icon name="chevronRight" size={13} />
+                  </div>
+                )}
+                {renamingFolderId && currentFolder && renamingFolderId === currentFolder._id && !searching ? (
+                  <input
+                    className="pf-title-input"
+                    value={renameValue}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onBlur={finishRename}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") e.currentTarget.blur()
+                      if (e.key === "Escape") setRenamingFolderId(null)
+                    }}
+                    aria-label="Folder name"
+                    autoFocus
+                  />
+                ) : (
+                  <h1 className="pf-title">{title}</h1>
+                )}
+                <p className="pf-count">{countLabel}</p>
+              </div>
+              <div className="pf-pagehead-actions">
+                {currentFolder && view === "home" && !searching && (
+                  <>
+                    <button className="pf-btn pf-btn--ghost" onClick={() => startRename(currentFolder)}>
+                      <Icon name="pencil" size={14} />
+                      Rename
+                    </button>
+                    <button className="pf-icon-btn pf-icon-btn--danger pf-icon-btn--bordered" onClick={() => deleteFolder(currentFolder)} title="Delete folder" aria-label="Delete folder">
+                      <Icon name="trash" size={15} />
+                    </button>
+                  </>
+                )}
+                {!searching && view !== "shared" && (
+                  <button className="pf-btn pf-btn--primary pf-upload-btn" onClick={() => pickFiles(view === "home" ? currentFolderId : null)}>
+                    <Icon name="upload" size={15} />
+                    Upload
+                  </button>
+                )}
+              </div>
+            </div>
+
+            {creatingFolder && (
+              <form
+                className="pf-newfolder"
+                onSubmit={(e) => { e.preventDefault(); createFolder() }}
+              >
+                <Icon name="folderPlus" size={18} />
                 <input
                   className="pf-input"
-                  type="text"
-                  placeholder="Folder name"
                   value={newFolderName}
                   onChange={(e) => setNewFolderName(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleCreateFolder()
-                    if (e.key === "Escape") { setShowNewFolderInput(false); setNewFolderName("") }
-                  }}
+                  onKeyDown={(e) => { if (e.key === "Escape") { setCreatingFolder(false); setNewFolderName("") } }}
+                  placeholder="Folder name"
+                  aria-label="New folder name"
+                  maxLength={60}
                   autoFocus
                 />
-                <button className="pf-btn pf-btn--primary" onClick={handleCreateFolder}>Create</button>
-                <button className="pf-btn pf-btn--ghost" onClick={() => { setShowNewFolderInput(false); setNewFolderName("") }}>Cancel</button>
-              </div>
+                <button className="pf-btn pf-btn--primary" type="submit" disabled={!newFolderName.trim()}>Create folder</button>
+                <button className="pf-btn pf-btn--ghost" type="button" onClick={() => { setCreatingFolder(false); setNewFolderName("") }}>Cancel</button>
+              </form>
             )}
 
             {showFolders && folders.length > 0 && (
-              <div className="pf-section">
-                <div className="pf-section-title">Folders</div>
+              <section className="pf-section" aria-labelledby="pf-folders-title">
+                <h2 className="pf-section-title" id="pf-folders-title">Folders</h2>
                 <div className="pf-folder-grid">
                   {folders.map((folder) => (
-                    <div key={folder._id} className="pf-folder-card" onClick={() => setCurrentFolderId(folder._id)}>
-                      <div className="pf-folder-card-icon">
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                      </div>
-                      {renamingFolder === folder._id ? (
-                        <input
-                          className="pf-input"
-                          value={renameValue}
-                          onChange={(e) => setRenameValue(e.target.value)}
-                          onClick={(e) => e.stopPropagation()}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") handleRenameFolder(folder._id)
-                            if (e.key === "Escape") { setRenamingFolder(null); setRenameValue("") }
-                          }}
-                          autoFocus
-                        />
+                    <div
+                      key={folder._id}
+                      className={`pf-folder ${dropTarget === folder._id ? "is-drop" : ""}`}
+                      {...dropTargetProps(folder._id)}
+                    >
+                      {renamingFolderId === folder._id ? (
+                        <span className="pf-folder-main">
+                          <span className="pf-folder-icon"><Icon name="folder" size={18} /></span>
+                          <input
+                            className="pf-input pf-input--inline"
+                            value={renameValue}
+                            onChange={(e) => setRenameValue(e.target.value)}
+                            onBlur={finishRename}
+                            onKeyDown={(e) => {
+                              if (e.key === "Enter") e.currentTarget.blur()
+                              if (e.key === "Escape") setRenamingFolderId(null)
+                            }}
+                            aria-label="Folder name"
+                            autoFocus
+                          />
+                        </span>
                       ) : (
-                        <span className="pf-folder-card-name" title={folder.name}>{folder.name}</span>
+                        <button className="pf-folder-main" onClick={() => goTo("home", folder._id)}>
+                          <span className="pf-folder-icon"><Icon name="folder" size={18} /></span>
+                          <span className="pf-folder-text">
+                            <span className="pf-folder-name" title={folder.name}>{folder.name}</span>
+                            <span className="pf-folder-count">
+                              {folderCounts[folder._id] ? `${folderCounts[folder._id]} ${folderCounts[folder._id] === 1 ? "file" : "files"}` : "Empty"}
+                            </span>
+                          </span>
+                        </button>
                       )}
-
-                      <div className="pf-folder-card-actions" onClick={(e) => e.stopPropagation()}>
-                        <button
-                          className="pf-icon-action"
-                          title="Rename"
-                          aria-label="Rename folder"
-                          onClick={() => { setRenamingFolder(folder._id); setRenameValue(folder.name) }}
-                        >
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
-                        </button>
-                        <button
-                          className="pf-icon-action pf-icon-action--danger"
-                          title="Delete"
-                          aria-label="Delete folder"
-                          onClick={() => handleDeleteFolder(folder._id, folder.name)}
-                        >
-                          <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-                        </button>
-                      </div>
-
                       <button
-                        className="pf-folder-more"
-                        aria-label="Folder options"
+                        className="pf-tool"
+                        onClick={(e) => openFolderMenu(e, folder)}
                         onMouseDown={(e) => e.stopPropagation()}
-                        onClick={(e) => {
-                          e.stopPropagation()
-                          const r = e.currentTarget.getBoundingClientRect()
-                          const x = r.right + 180 > window.innerWidth ? r.left - 180 : r.right
-                          const y = r.bottom + 120 > window.innerHeight ? r.top - 120 : r.bottom
-                          setFolderMenu({ x, y, folder })
-                        }}
+                        aria-label={`Actions for ${folder.name}`}
+                        title="Folder actions"
                       >
-                        <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="5" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="19" r="1.5" fill="currentColor"/></svg>
+                        <Icon name="more" size={15} />
                       </button>
                     </div>
                   ))}
                 </div>
-              </div>
+              </section>
             )}
 
-            <div className="pf-section">
-              <div className="pf-section-title">
-                {view === "home" ? (currentFolder ? `Files in "${currentFolder.name}"` : "Files") : titleForView()}
-              </div>
-
-              {visibleFiles.length === 0 ? (
+            <section className="pf-section" aria-labelledby="pf-files-title">
+              {showFolders && folders.length > 0 && <h2 className="pf-section-title" id="pf-files-title">Files</h2>}
+              {loading ? (
+                renderSkeleton()
+              ) : visibleFiles.length === 0 ? (
                 <div className="pf-empty">
-                  <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.3">
-                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                    <polyline points="17 8 12 3 7 8"/>
-                    <line x1="12" y1="3" x2="12" y2="15"/>
-                  </svg>
-                  <h3>{search ? "No matches" : "No files here"}</h3>
-                  <p>
-                    {search
-                      ? `No files match "${search}".`
-                      : "Drag files anywhere on this page or use the New button to upload."}
-                  </p>
-                  {!search && (
-                    <button className="pf-btn pf-btn--primary" onClick={() => fileInputRef.current?.click()}>
-                      Upload a file
-                    </button>
-                  )}
+                  <span className="pf-empty-icon"><Icon name={empty.icon} size={22} strokeWidth={1.8} /></span>
+                  <h3>{empty.title}</h3>
+                  <p>{empty.text}</p>
+                  {empty.action}
                 </div>
               ) : layout === "grid" ? (
-                <div className="pf-file-grid">
-                  {visibleFiles.map((file) => (
-                    <div key={file.ID} className="pf-file-card" onContextMenu={(e) => onContextMenu(e, file)}>
-                      <div className="pf-file-thumb" style={fileIconStyle(file.Filename)}>
-                        <span className="pf-file-ext">{fileExt(file.Filename)}</span>
-                      </div>
-                      <div className="pf-file-name" title={file.Filename}>{file.Filename}</div>
-                      <div className="pf-file-meta">
-                        <span>{file.size}</span>
-                        <span className="pf-dot">·</span>
-                        <span>{new Date(file.CreatedAt).toLocaleDateString()}</span>
-                      </div>
-
-                      <div className="pf-file-actions pf-file-actions--desktop">
-                        <a href={fileUrl(file.ID, "inspect", file.isPublic)} target="_blank" className="pf-icon-action" rel="noreferrer" title="Open" aria-label="Open">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                        </a>
-                        <a href={fileUrl(file.ID, "download", file.isPublic)} target="_blank" className="pf-icon-action pf-icon-action--primary" rel="noreferrer" title="Download" aria-label="Download">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                        </a>
-                        <button onClick={() => handleCopy(file.ID, file.isPublic)} className="pf-icon-action" title="Copy view link" aria-label="Copy view link">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-                        </button>
-                        <button
-                          onClick={() => handleToggleVisibility(file.ID)}
-                          className={`pf-vis-toggle ${file.isPublic ? "is-public" : ""}`}
-                          title={file.isPublic ? "Public — click to make private" : "Private — click to make public"}
-                        >
-                          <span className="pf-vis-toggle-track"><span className="pf-vis-toggle-thumb" /></span>
-                          <span className="pf-vis-toggle-label">{file.isPublic ? "Public" : "Private"}</span>
-                        </button>
-                        <button onClick={() => handleDelete(file.ID)} className="pf-icon-action pf-icon-action--danger" title="Delete" aria-label="Delete">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-                        </button>
-                      </div>
-
-                      <div className="pf-file-actions pf-file-actions--mobile">
-                        <a href={fileUrl(file.ID, "inspect", file.isPublic)} target="_blank" className="pf-file-open-dl" rel="noreferrer">
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                          Open
-                        </a>
-                        <a href={fileUrl(file.ID, "download", file.isPublic)} target="_blank" className="pf-file-open-dl pf-file-open-dl--accent" rel="noreferrer">
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                          Download
-                        </a>
-                        <button className="pf-icon-action" aria-label="More options" onClick={(e) => openMoreMenu(e, file)}>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="5" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="19" r="1.5" fill="currentColor"/></svg>
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                renderGrid()
               ) : (
-                <div className="pf-table">
-                  <div className="pf-table-head">
-                    <div className="pf-col pf-col-name">Name</div>
-                    <div className="pf-col pf-col-size">Size</div>
-                    <div className="pf-col pf-col-views">Views</div>
-                    <div className="pf-col pf-col-dl">Downloads</div>
-                    <div className="pf-col pf-col-date">Created</div>
-                    <div className="pf-col pf-col-vis">Visibility</div>
-                    <div className="pf-col pf-col-actions">Actions</div>
-                  </div>
-                  {visibleFiles.map((file) => (
-                    <div key={file.ID} className="pf-table-row" onContextMenu={(e) => onContextMenu(e, file)}>
-                      <div className="pf-col pf-col-name">
-                        <span className="pf-file-ext" style={fileIconStyle(file.Filename)}>{fileExt(file.Filename)}</span>
-                        <span className="pf-name-text" title={file.Filename}>{file.Filename}</span>
-                      </div>
-                      <div className="pf-col pf-col-size">{file.size}</div>
-                      <div className="pf-col pf-col-views">{file.views}</div>
-                      <div className="pf-col pf-col-dl">{file.downloads}</div>
-                      <div className="pf-col pf-col-date">{new Date(file.CreatedAt).toLocaleDateString()}</div>
-                      <div className="pf-col pf-col-vis">
-                        <button
-                          onClick={() => handleToggleVisibility(file.ID)}
-                          className={`pf-vis-toggle ${file.isPublic ? "is-public" : ""}`}
-                          title={file.isPublic ? "Public — click to make private" : "Private — click to make public"}
-                        >
-                          <span className="pf-vis-toggle-track"><span className="pf-vis-toggle-thumb" /></span>
-                          <span className="pf-vis-toggle-label">{file.isPublic ? "Public" : "Private"}</span>
-                        </button>
-                      </div>
-                      <div className="pf-col pf-col-actions">
-                        <a href={fileUrl(file.ID, "inspect", file.isPublic)} target="_blank" className="pf-icon-action" rel="noreferrer" title="Open" aria-label="Open">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-                        </a>
-                        <a href={fileUrl(file.ID, "download", file.isPublic)} target="_blank" className="pf-icon-action pf-icon-action--primary" rel="noreferrer" title="Download" aria-label="Download">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                        </a>
-                        <button onClick={() => handleCopy(file.ID, file.isPublic)} className="pf-icon-action" title="Copy view link" aria-label="Copy view link">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-                        </button>
-                        {folders.length > 0 && (
-                          <select
-                            className="pf-move-select"
-                            value={file.folderId || ""}
-                            onChange={(e) => handleMoveFile(file.ID, e.target.value || null)}
-                            title="Move to folder"
-                          >
-                            <option value="">Root</option>
-                            {folders.map((f) => (
-                              <option key={f._id} value={f._id}>{f.name}</option>
-                            ))}
-                          </select>
-                        )}
-                        <button onClick={() => handleDelete(file.ID)} className="pf-icon-action pf-icon-action--danger" title="Delete" aria-label="Delete">
-                          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-                        </button>
-                      </div>
-                      <div className="pf-col pf-col-actions pf-col-actions--mobile">
-                        <a href={fileUrl(file.ID, "download", file.isPublic)} target="_blank" className="pf-file-open-dl pf-file-open-dl--accent" rel="noreferrer">
-                          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-                          Download
-                        </a>
-                        <button className="pf-icon-action" aria-label="More options" onClick={(e) => openMoreMenu(e, file)}>
-                          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5"><circle cx="12" cy="5" r="1.5" fill="currentColor"/><circle cx="12" cy="12" r="1.5" fill="currentColor"/><circle cx="12" cy="19" r="1.5" fill="currentColor"/></svg>
-                        </button>
-                      </div>
-                    </div>
-                  ))}
-                </div>
+                renderList()
               )}
-            </div>
+            </section>
           </div>
 
-          {dragOver && (
-            <div className="pf-drop-overlay">
-              <div className="pf-drop-overlay-inner">
-                <svg width="40" height="40" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                  <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/>
-                  <polyline points="17 8 12 3 7 8"/>
-                  <line x1="12" y1="3" x2="12" y2="15"/>
-                </svg>
-                <div>Drop files to upload</div>
+          {externalDrag && (
+            <div className="pf-dropzone" aria-hidden="true">
+              <div className="pf-dropzone-inner">
+                <Icon name="upload" size={28} strokeWidth={1.8} />
+                <strong>Drop to upload to {view === "home" && currentFolder ? currentFolder.name : "My Drive"}</strong>
+                <span>Or drop onto a folder in the sidebar</span>
               </div>
             </div>
           )}
         </main>
+
+        {selectedFile && (
+          <>
+            <div className="pf-details-backdrop" onClick={() => setSelectedId(null)} />
+            <FileDetails
+              key={selectedFile.ID}
+              file={selectedFile}
+              folders={folders}
+              shareUrl={shareUrl}
+              openUrl={openUrl}
+              onClose={() => setSelectedId(null)}
+              onToggleVisibility={toggleVisibility}
+              onCopy={copyLink}
+              onMove={moveFile}
+              onDelete={deleteFile}
+            />
+          </>
+        )}
       </div>
 
-      {fileQueue.length > 0 && (
-        <div className="pf-toast">
-          <div className="pf-toast-head">
-            {uploading ? "Uploading…" : "Upload complete"}
-          </div>
-          <div className="pf-toast-body">
-            {fileQueue.map((entry, i) => (
-              <div key={i} className={`pf-toast-item is-${entry.status}`}>
-                <span className="pf-toast-name" title={entry.file.name}>{entry.file.name}</span>
-                <span>
-                  {entry.status === "pending" && <button className="pf-toast-x" onClick={() => removeFromQueue(i)} aria-label="Remove">✕</button>}
-                  {entry.status === "uploading" && <span className="pf-spin" />}
-                  {entry.status === "done" && <span className="pf-toast-badge is-done">✓</span>}
-                  {entry.status === "error" && <span className="pf-toast-badge is-error">✗</span>}
-                </span>
-              </div>
-            ))}
-          </div>
+      <button className="pf-fab" onClick={() => pickFiles(view === "home" ? currentFolderId : null)} aria-label="Upload files">
+        <Icon name="upload" size={20} />
+      </button>
+
+      {newMenu && (
+        <div className="pf-menu pf-menu--wide" role="menu" style={newMenu} onMouseDown={(e) => e.stopPropagation()}>
+          <button className="pf-menu-item" role="menuitem" onClick={() => { setNewMenu(null); pickFiles(view === "home" ? currentFolderId : null) }}>
+            <Icon name="upload" />
+            <span className="pf-menu-text">
+              Upload files
+              <small>To {view === "home" && currentFolder ? currentFolder.name : "My Drive"}, up to 5 MB each</small>
+            </span>
+          </button>
+          <button className="pf-menu-item" role="menuitem" onClick={() => { setNewMenu(null); setCreatingFolder(true); setSidebarOpen(false) }}>
+            <Icon name="folderPlus" />
+            <span className="pf-menu-text">
+              New folder
+              <small>Group related files together</small>
+            </span>
+          </button>
         </div>
       )}
 
-      {showNewModal && (
-        <div className="pf-modal-backdrop" onMouseDown={() => setShowNewModal(false)}>
-          <div className="pf-modal" onMouseDown={(e) => e.stopPropagation()}>
-            <div className="pf-modal-head">
-              <h3>Create new</h3>
-              <button className="pf-modal-close" onClick={() => setShowNewModal(false)} aria-label="Close">
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/></svg>
-              </button>
-            </div>
-            <div className="pf-modal-body">
-              <button type="button" className="pf-modal-option" onClick={() => rootFileInputRef.current?.click()}>
-                <span className="pf-modal-option-icon">
-                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="17 8 12 3 7 8"/><line x1="12" y1="3" x2="12" y2="15"/></svg>
-                </span>
-                <span className="pf-modal-option-text">
-                  <span className="pf-modal-option-title">Upload files</span>
-                  <span className="pf-modal-option-sub">
-                    Uploads to <strong>{currentFolder ? currentFolder.name : "My Drive"}</strong> · up to 5 files, 5 MB each
-                  </span>
-                </span>
-              </button>
-              <button
-                type="button"
-                className="pf-modal-option"
-                onClick={() => {
-                  setShowNewModal(false)
-                  setView("home")
-                  setCurrentFolderId(null)
-                  setShowNewFolderInput(true)
-                }}
-              >
-                <span className="pf-modal-option-icon pf-modal-option-icon--folder">
-                  <svg width="19" height="19" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>
-                </span>
-                <span className="pf-modal-option-text">
-                  <span className="pf-modal-option-title">New folder</span>
-                  <span className="pf-modal-option-sub">Organize files in My Drive</span>
-                </span>
-              </button>
-            </div>
-          </div>
+      {fileMenu && (
+        <div className="pf-menu" role="menu" style={{ left: fileMenu.left, top: fileMenu.top }} onMouseDown={(e) => e.stopPropagation()}>
+          <a className="pf-menu-item" role="menuitem" href={openUrl(fileMenu.file, "inspect")} target="_blank" rel="noreferrer" onClick={() => setFileMenu(null)}>
+            <Icon name="external" />Open
+          </a>
+          <a className="pf-menu-item" role="menuitem" href={openUrl(fileMenu.file, "download")} target="_blank" rel="noreferrer" onClick={() => setFileMenu(null)}>
+            <Icon name="download" />Download
+          </a>
+          <button className="pf-menu-item" role="menuitem" onClick={() => { copyLink(fileMenu.file); setFileMenu(null) }}>
+            <Icon name="link" />Copy link
+          </button>
+          <button className="pf-menu-item" role="menuitem" onClick={() => { toggleVisibility(fileMenu.file); setFileMenu(null) }}>
+            <Icon name={fileMenu.file.isPublic ? "lock" : "globe"} />
+            {fileMenu.file.isPublic ? "Make private" : "Turn on public link"}
+          </button>
+          <button className="pf-menu-item" role="menuitem" onClick={() => { setSelectedId(fileMenu.file.ID); setFileMenu(null) }}>
+            <Icon name="move" />Details and move
+          </button>
+          <div className="pf-menu-divider" />
+          <button className="pf-menu-item pf-menu-item--danger" role="menuitem" onClick={() => { deleteFile(fileMenu.file); setFileMenu(null) }}>
+            <Icon name="trash" />Delete
+          </button>
         </div>
       )}
-
-      <SettingsModal
-        isOpen={isSettingsOpen}
-        onClose={() => setIsSettingsOpen(false)}
-      />
 
       {folderMenu && (
-        <div className="pf-menu" style={{ top: folderMenu.y, left: folderMenu.x }} onMouseDown={(e) => e.stopPropagation()}>
-          <button className="pf-menu-item" onClick={() => { setRenamingFolder(folderMenu.folder._id); setRenameValue(folderMenu.folder.name); setFolderMenu(null) }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4z"/></svg>
-            Rename
+        <div className="pf-menu" role="menu" style={{ left: folderMenu.left, top: folderMenu.top }} onMouseDown={(e) => e.stopPropagation()}>
+          <button className="pf-menu-item" role="menuitem" onClick={() => { startRename(folderMenu.folder); setFolderMenu(null) }}>
+            <Icon name="pencil" />Rename
           </button>
           <div className="pf-menu-divider" />
-          <button className="pf-menu-item pf-menu-item--danger" onClick={() => { handleDeleteFolder(folderMenu.folder._id, folderMenu.folder.name); setFolderMenu(null) }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-            Delete folder
+          <button className="pf-menu-item pf-menu-item--danger" role="menuitem" onClick={() => { deleteFolder(folderMenu.folder); setFolderMenu(null) }}>
+            <Icon name="trash" />Delete folder
           </button>
         </div>
       )}
 
-      {contextMenu && (
-        <div className="pf-menu" style={{ top: contextMenu.y, left: contextMenu.x }} onMouseDown={(e) => e.stopPropagation()}>
-          <a href={fileUrl(contextMenu.file.ID, "inspect", contextMenu.file.isPublic)} target="_blank" rel="noreferrer" className="pf-menu-item" onClick={() => setContextMenu(null)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            Open
-          </a>
-          <a href={fileUrl(contextMenu.file.ID, "download", contextMenu.file.isPublic)} target="_blank" rel="noreferrer" className="pf-menu-item" onClick={() => setContextMenu(null)}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"/><polyline points="7 10 12 15 17 10"/><line x1="12" y1="15" x2="12" y2="3"/></svg>
-            Download
-          </a>
-          <div className="pf-menu-divider" />
-          <button className="pf-menu-item" onClick={() => { handleCopy(contextMenu.file.ID, contextMenu.file.isPublic); setContextMenu(null) }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
-            Copy view link
-          </button>
-          <button className="pf-menu-item" onClick={() => { handleCopyDownload(contextMenu.file.ID, contextMenu.file.isPublic); setContextMenu(null) }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round"><rect x="8" y="2" width="8" height="4" rx="1"/><path d="M16 4h2a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h2"/><polyline points="9 14 12 17 15 14"/><line x1="12" y1="11" x2="12" y2="17"/></svg>
-            Copy download link
-          </button>
-          <button className="pf-menu-item" onClick={() => { handleToggleVisibility(contextMenu.file.ID); setContextMenu(null) }}>
-            {contextMenu.file.isPublic
-              ? <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><rect x="3" y="11" width="18" height="11" rx="2"/><path d="M7 11V7a5 5 0 0 1 10 0v4"/></svg>
-              : <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
-            }
-            Make {contextMenu.file.isPublic ? "private" : "public"}
-          </button>
-          <div className="pf-menu-divider" />
-          <button className="pf-menu-item pf-menu-item--danger" onClick={() => { handleDelete(contextMenu.file.ID); setContextMenu(null) }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2"><polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/></svg>
-            Delete
-          </button>
-        </div>
-      )}
+      <UploadPanel
+        queue={queue}
+        onDismiss={() => setQueue([])}
+        onCancel={(id) => setQueue((q) => q.filter((e) => e.id !== id))}
+        onRetry={(id) => updateEntry(id, { status: "queued", error: null, progress: 0 })}
+      />
+
+      <Toasts toasts={toasts} dismiss={dismissToast} />
+
+      <SettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
     </div>
   )
 }

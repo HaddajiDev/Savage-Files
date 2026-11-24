@@ -8,19 +8,25 @@ const transporter = nodemailer.createTransport({
     }
 });
 
+const API_BASE = (process.env.API_URL || 'https://savage-files-cdn.vercel.app').replace(/\/+$/, '');
+
+const escapeHtml = (value) => String(value ?? '').replace(/[&<>"']/g, (c) => ({
+    '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;',
+}[c]));
+
 const sendVerificationEmail = async (email, userName, token) => {
     const mailOptions = {
         from: process.env.EMAIL,
         to: email,
-        subject: 'Verfication Link for Savage Files',
+        subject: 'Verification Link for Savage Files',
         html: `
         <div style="background: #12001a; padding: 36px 24px; border-radius: 12px; max-width: 420px; margin: 0 auto; box-shadow: 0 8px 32px rgba(60,0,90,0.25); font-family: 'Segoe UI', Arial, sans-serif; color: #e0d6f6;">
           <h2 style="color: #d1aaff; margin-top: 0; letter-spacing: 1px;">Welcome to Savage Files!</h2>
           <p style="margin: 18px 0 28px 0; color: #bba0e3;">
-            Hi <strong>${userName}</strong>,<br>
+            Hi <strong>${escapeHtml(userName)}</strong>,<br>
             Thank you for signing up. Please verify your account to get started and unlock all features.
           </p>
-          <a href="https://savage-files-cdn.vercel.app/user/confirm/add-email/${token}" style="
+          <a href="${API_BASE}/user/confirm/add-email/${encodeURIComponent(token)}" style="
             background: linear-gradient(90deg, #2d0036 0%, #6f1e51 100%);
             color: #fff;
             padding: 14px 32px;
@@ -64,10 +70,10 @@ const sendPasswordResetEmail = async (email, userName, token) => {
           <div style="background: #12001a; padding: 36px 24px; border-radius: 12px; max-width: 420px; margin: 0 auto; box-shadow: 0 8px 32px rgba(60,0,90,0.25); font-family: 'Segoe UI', Arial, sans-serif; color: #e0d6f6;">
             <h2 style="color: #d1aaff; margin-top: 0; letter-spacing: 1px;">Welcome to Savage Files!</h2>
             <p style="margin: 18px 0 28px 0; color: #bba0e3;">
-              Hi <strong>${userName}</strong>,<br>
+              Hi <strong>${escapeHtml(userName)}</strong>,<br>
               Reset password. Please don't share the link with anyone.
             </p>
-            <a href="https://savage-files-cdn.vercel.app/user/verify-reset?token=${token}" style="
+            <a href="${API_BASE}/user/verify-reset?token=${encodeURIComponent(token)}" style="
               background: linear-gradient(90deg, #2d0036 0%, #6f1e51 100%);
               color: #fff;
               padding: 14px 32px;
@@ -110,10 +116,10 @@ const sendConformationNewEmail = async (email, userName, token) => {
           <div style="background: #12001a; padding: 36px 24px; border-radius: 12px; max-width: 420px; margin: 0 auto; box-shadow: 0 8px 32px rgba(60,0,90,0.25); font-family: 'Segoe UI', Arial, sans-serif; color: #e0d6f6;">
             <h2 style="color: #d1aaff; margin-top: 0; letter-spacing: 1px;">Welcome to Savage Files!</h2>
             <p style="margin: 18px 0 28px 0; color: #bba0e3;">
-              Hi <strong>${userName}</strong>,<br>
+              Hi <strong>${escapeHtml(userName)}</strong>,<br>
               Verify your new email by clicking the link below.
             </p>
-            <a href="https://savage-files-cdn.vercel.app/user/verify-new-email?token=${token}" style="
+            <a href="${API_BASE}/user/verify-new-email?token=${encodeURIComponent(token)}" style="
               background: linear-gradient(90deg, #2d0036 0%, #6f1e51 100%);
               color: #fff;
               padding: 14px 32px;
@@ -142,9 +148,9 @@ const sendConformationNewEmail = async (email, userName, token) => {
         console.log('Verify your new email sent successfully');
         return true;
     } catch (error) {
-        console.error('Error sending password reset email:', error);
+        console.error('Error sending new email verification:', error);
         return false;
-    }   
+    }
 };
 
 module.exports = {

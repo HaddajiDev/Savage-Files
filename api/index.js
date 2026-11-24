@@ -1,50 +1,39 @@
-const express = require('express');
-const cors = require('cors');
-const mongoose = require("mongoose");
-const rateLimit = require('express-rate-limit');
 require('dotenv').config();
 
-//
-
-const connect = require('./db_connect');
-const fileRoutes = require('./routes/file');
+const express = require('express');
+const cors = require('cors');
+const mongoose = require('mongoose');
+const rateLimit = require('express-rate-limit');
 const { GridFSBucket } = require('mongodb');
 
-const app = express();
-const allowedOrigins = [
-    'http://localhost:3000',
-    'https://savage-files.vercel.app',
-];
+const fileRoutes = require('./routes/file');
+const userRoutes = require('./routes/user');
 
-// Allow Vercel preview deployments too (e.g. savage-files-git-foo-user.vercel.app)
-const isAllowedOrigin = (origin) => {
-    if (!origin) return true;
-    if (allowedOrigins.includes(origin)) return true;
-    if (/^https:\/\/savage-files-[a-z0-9-]+\.vercel\.app$/.test(origin)) return true;
-    return false;
-};
+const app = express();
+
+const allowedOrigins = (process.env.CORS_ORIGINS || 'http://localhost:3000,https://savage-files.vercel.app')
+    .split(',')
+    .map(origin => origin.trim())
+    .filter(Boolean);
+const previewOrigin = /^https:\/\/savage-files-[a-z0-9-]+\.vercel\.app$/;
+
+const isAllowedOrigin = (origin) => !origin || allowedOrigins.includes(origin) || previewOrigin.test(origin);
 
 const corsOptions = {
-    // Never throw — return false so the middleware just omits ACAO
-    // (instead of producing a 500 without CORS headers that the browser may cache).
     origin: (origin, callback) => callback(null, isAllowedOrigin(origin)),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
     allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
-    maxAge: 600, // cache preflight for 10 minutes
+    maxAge: 600,
 };
 
 app.use(cors(corsOptions));
-// Make sure every OPTIONS preflight short-circuits with proper CORS headers,
-// before hitting any rate limiter or other middleware.
 app.options('*', cors(corsOptions));
 
 app.set('trust proxy', 1);
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
 
-// Prevent intermediaries (and the browser) from caching API responses
-// that could otherwise be served cross-origin without CORS headers.
 app.use((req, res, next) => {
     res.set('Vary', 'Origin');
     res.set('Cache-Control', 'no-store');
@@ -54,66 +43,65 @@ app.use((req, res, next) => {
 const limiterBase = {
     standardHeaders: true,
     legacyHeaders: false,
-    // Don't count preflights against the limit — and don't let a 429
-    // be the first response a fresh browser sees for a preflight.
     skip: (req) => req.method === 'OPTIONS',
+    message: { error: 'Too many requests, please try again later.' },
 };
 
-const authLimiter = rateLimit({
-    ...limiterBase,
-    windowMs: 15 * 60 * 1000, // 15 minutes
-    max: 20,
-    message: { error: 'Too many requests, please try again later.' },
-});
+const authLimiter = rateLimit({ ...limiterBase, windowMs: 15 * 60 * 1000, max: 20 });
+const generalLimiter = rateLimit({ ...limiterBase, windowMs: 15 * 60 * 1000, max: 200 });
 
-const generalLimiter = rateLimit({
-    ...limiterBase,
-    windowMs: 15 * 60 * 1000,
-    max: 200,
-    message: { error: 'Too many requests, please try again later.' },
-});
+let filesRouter = null;
 
-// idk
-
-//#region Connect to mongoDB
-const url = process.env.URI;
-const connect_2 = async () => {
-    try {
-        const result = await mongoose.connect(url, {
-            dbName: 'myFiles'
-        });
-        
-        console.log("Connected to MongoDB");
-    } catch (error) {
-        console.error("Failed to connect to MongoDB", error);
+async function connectDatabase() {
+    if (mongoose.connection.readyState !== 1) {
+        await mongoose.connect(process.env.URI, { dbName: 'myFiles' });
+        console.log('Connected to MongoDB');
+    }
+    if (!filesRouter) {
+        const db = mongoose.connection.db;
+        filesRouter = fileRoutes(db, new GridFSBucket(db, { bucketName: 'uploads' }));
     }
 }
-//#endregion
 
-connect_2();
-const router = require('./routes/user')
-app.use('/user/login', authLimiter);
-app.use('/user/register', authLimiter);
-app.use('/user/send', authLimiter);
-app.use('/user/reset-password', authLimiter);
-app.use('/user', generalLimiter, router);
-
-(async () => {
-    try {
-        const db = await connect();
-        const bucket = new GridFSBucket(db, {
-            bucketName: 'uploads'
+let connecting = null;
+function ready() {
+    if (!connecting) {
+        connecting = connectDatabase().catch((error) => {
+            connecting = null;
+            throw error;
         });
-        
-        app.use('/files', generalLimiter, fileRoutes(db, bucket));
-        
-
-        app.get("/", (req, res) => res.send("Working"));
-
-        app.listen(process.env.PORT, () => {
-            console.log(`server running on ${process.env.PORT}`);
-        });
-    } catch (error) {
-        console.error('Error connecting to db:', error);
     }
-})();
+    return connecting;
+}
+
+ready().catch((error) => console.error('Failed to connect to MongoDB', error));
+
+app.get('/', (req, res) => res.send('Working'));
+
+app.use(async (req, res, next) => {
+    if (req.method === 'OPTIONS') return next();
+    try {
+        await ready();
+        next();
+    } catch (error) {
+        console.error('Database unavailable:', error);
+        res.status(503).send({ error: 'Service temporarily unavailable' });
+    }
+});
+
+app.use(['/user/login', '/user/register', '/user/send', '/user/reset-password', '/user/set-new-password'], authLimiter);
+app.use('/user', generalLimiter, userRoutes);
+app.use('/files', generalLimiter, (req, res, next) => filesRouter(req, res, next));
+
+app.use((err, req, res, next) => {
+    console.error('Unhandled error:', err);
+    if (res.headersSent) return next(err);
+    res.status(500).send({ error: 'Something went wrong' });
+});
+
+if (!process.env.VERCEL) {
+    const port = process.env.PORT || 5000;
+    app.listen(port, () => console.log(`server running on ${port}`));
+}
+
+module.exports = app;
